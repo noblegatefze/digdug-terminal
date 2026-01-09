@@ -269,12 +269,16 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.1.13.1";
+const BUILD_VERSION = "Zero Phase v0.1.13.2";
 
 // local storage keys
 const STORAGE_KEY_PASS = "dd_terminal_pass_v1";
 const STORAGE_KEY_USERS = "dd_terminal_users_v1";
 const STORAGE_KEY_ALLOC_LAST_AT = "dd_usddd_alloc_last_at_v1";
+
+// acquired USDDD lifetime totals (per Terminal Pass, device-local)
+const STORAGE_KEY_ACQUIRED_TOTAL_V1 = "dd_usddd_acquired_total_v1";
+
 
 // wallets
 const STORAGE_KEY_WALLETS_V2 = "dd_wallets_mock_v2";
@@ -293,6 +297,10 @@ const STORAGE_KEY_INSTALL_ID = "dd_install_id_v1";
 // locked defaults
 const DAILY_ALLOCATION = 5;
 const BASE_CAP = 20;
+
+// acquisition cap (acquired only; not daily allocation)
+const ACQUIRE_CAP = 1000;
+
 
 // sponsor bounds
 const COST_MIN = 0.01;
@@ -430,6 +438,42 @@ function saveUsers(users: Record<string, TerminalPass>) {
     // ignore
   }
 }
+
+/** --- Acquired USDDD totals (device-local, per Terminal Pass) --- **/
+type AcquiredTotals = Record<string, number>;
+function loadAcquiredTotals(): AcquiredTotals {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_ACQUIRED_TOTAL_V1);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as AcquiredTotals;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+function saveAcquiredTotals(m: AcquiredTotals) {
+  try {
+    localStorage.setItem(STORAGE_KEY_ACQUIRED_TOTAL_V1, JSON.stringify(m));
+  } catch {
+    // ignore
+  }
+}
+function getAcquiredTotalForUser(username: string | null) {
+  if (!username) return 0;
+  const m = loadAcquiredTotals();
+  const v = Number(m[username] ?? 0);
+  return Number.isFinite(v) ? v : 0;
+}
+function addAcquiredForUser(username: string, amt: number) {
+  const m = loadAcquiredTotals();
+  const prev = Number(m[username] ?? 0);
+  const safePrev = Number.isFinite(prev) ? prev : 0;
+  const next = safePrev + amt;
+  m[username] = next;
+  saveAcquiredTotals(m);
+  return next;
+}
+
 
 function seedSponsorCampaigns(): Campaign[] {
   const mk = (id: string, chainId: ChainId, sym: string, cost: number, cooldown: number, balance: number): Campaign => ({
@@ -626,6 +670,8 @@ export default function Page() {
   // USDDD balances
   const [usdddAllocated, setUsdddAllocated] = useState(10);
   const [usdddAcquired, setUsdddAcquired] = useState(0);
+  const [acquiredTotal, setAcquiredTotal] = useState(0);
+
   const usdddTotal = usdddAllocated + usdddAcquired;
 
   // protocol treasury
@@ -874,6 +920,12 @@ export default function Page() {
 
   const authedUser = terminalPass?.username ?? null;
   const twoFaEnabled = terminalPass?.twoFaEnabled ?? false;
+
+
+  // acquired total is per Terminal Pass (device-local)
+  useEffect(() => {
+    setAcquiredTotal(getAcquiredTotalForUser(authedUser));
+  }, [authedUser]);
 
   // scroll
   useEffect(() => {
@@ -2216,15 +2268,16 @@ const sponsorActivate = () => {
     }
     if (low === "commands" || low === "cmds") return void printCommands(consoleModeRef.current);
 
-    // nuke
-    if (low === "nuke" || low === "wipe") {
-      emit("warn", "⚠️  DEV COMMAND: NUKE (erases local state)");
-      emit("info", `Type ${C("YES")} to confirm or ${C("NO")} to cancel.`);
-      setPrompt({ mode: "CONFIRM_NUKE" });
-      return;
-    }
+    // nuke (admin-only)
+if (low === "nuke" || low === "wipe") {
+  if (!requireAdminUser()) return;
+  emit("warn", "⚠️  DEV COMMAND: NUKE (erases local state)");
+  emit("info", `Type ${C("YES")} to confirm or ${C("NO")} to cancel.`);
+  setPrompt({ mode: "CONFIRM_NUKE" });
+  return;
+}
 
-    // console switch
+// console switch
     if (low === "user") return void switchConsole("USER");
     if (low === "sponsor") return void switchConsole("SPONSOR");
     if (low === "admin") return void switchConsole("ADMIN");
@@ -2445,12 +2498,19 @@ const sponsorActivate = () => {
     }
 
     if (prompt.mode === "CONFIRM_NUKE") {
-      if (isYes(trimmed)) {
-        setPrompt({ mode: "IDLE" });
-        nukeLocalState();
-        return;
-      }
-      if (isNo(trimmed)) {
+  // hard gate: admin only, even inside confirm prompt
+  if (!terminalPass || terminalPass.username !== "admin") {
+    emit("err", "ACCESS DENIED // ADMIN CLEARANCE REQUIRED");
+    setPrompt({ mode: "IDLE" });
+    return;
+  }
+
+  if (isYes(trimmed)) {
+    setPrompt({ mode: "IDLE" });
+    nukeLocalState();
+    return;
+  }
+if (isNo(trimmed)) {
         emit("sys", "NUKE cancelled.");
         setPrompt({ mode: "IDLE" });
         return;
@@ -2616,13 +2676,33 @@ const sponsorActivate = () => {
 
     // econ
     if (prompt.mode === "ACQUIRE_USDDD_AMOUNT") {
-      const amt = Number(trimmed);
-      if (!Number.isFinite(amt) || amt <= 0) return void emit("warn", "Enter a valid amount.");
-      setUsdddAcquired((p) => p + amt);
-      emit("ok", `Acquired confirmed: +${amt.toFixed(2)} USDDD (Acquired).`);
-      setPrompt({ mode: "IDLE" });
-      return;
-    }
+  if (!requirePass()) return;
+
+  const amt = Number(trimmed);
+  if (!Number.isFinite(amt) || amt <= 0) return void emit("warn", "Enter a valid amount.");
+
+  const user = terminalPass!.username;
+  const currentTotal = getAcquiredTotalForUser(user);
+  const nextTotal = currentTotal + amt;
+
+  if (nextTotal > ACQUIRE_CAP + 1e-9) {
+    const remaining = Math.max(0, ACQUIRE_CAP - currentTotal);
+    emit("err", `ACQUIRE BLOCKED // USDDD ACQUISITION CAP REACHED (${ACQUIRE_CAP})`);
+    emit("info", `Remaining cap: ${remaining.toFixed(2)} USDDD`);
+    emit("sys", "Cap applies to acquired USDDD only (not daily allocation).");
+    setPrompt({ mode: "IDLE" });
+    return;
+  }
+
+  const updatedTotal = addAcquiredForUser(user, amt);
+  setAcquiredTotal(updatedTotal);
+  setUsdddAcquired((p) => p + amt);
+
+  emit("ok", `Acquired confirmed: +${amt.toFixed(2)} USDDD (Acquired).`);
+  emit("sys", `Acquired total (this device): ${updatedTotal.toFixed(2)} / ${ACQUIRE_CAP}`);
+  setPrompt({ mode: "IDLE" });
+  return;
+}
 
     // dig prompts
     if (prompt.mode === "DIG_CHOICE") {
