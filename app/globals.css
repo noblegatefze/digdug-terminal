@@ -1,26 +1,874 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Global sizing */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* =========================
+   DIGDUG.DO Terminal System
+   ========================= */
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #050505;
+  --panel: rgba(8, 8, 8, 0.92);
+  --text: rgba(245, 245, 245, 0.92);
+  --text-dim: rgba(245, 245, 245, 0.62);
+  --green: #3cff8a;
+  --red: #ff4d4d;
+  --yellow: #ffd34d;
+  --cyan: #4de1ff;
+  --line: rgba(255, 255, 255, 0.14);
+  --shadow: rgba(0, 0, 0, 0.6);
+
+  /* USDDD brand */
+  --usddd: #ff8a1f;
+  --usddd2: #ffb04d;
+
+  /* v0.1.8 sizing tokens (desktop defaults) */
+  --dd-font: 18px;
+  --dd-lineh: 1.55;
+
+  /* Make desktop timestamp gutter wider so message never feels cramped */
+  --dd-ts-min: 112px;
+
+  --dd-pad-top: 54px;
+  --dd-pad-btm: 120px;
+
+  --dd-chrome-x: 12px;
+  --dd-chrome-btm: 10px;
+  --dd-controls-gap: 10px;
+
+  /* Desktop right gutter size used by terminal + command bar */
+  --dd-right-gutter: 17px;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html,
+body {
+  height: 100%;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  letter-spacing: 0.02em;
+
+  /* Mobile sanity */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  overscroll-behavior: none;
+}
+
+/* ====== Screen / CRT feel ====== */
+.dd-screen {
+  min-height: 100vh;
+  position: relative;
+  overflow: hidden;
+}
+
+/* ===============================
+   Screen dim when instruction drawer is open
+   =============================== */
+
+.dd-screen.dd-dimall::before {
+  opacity: 0.9;
+}
+
+.dd-screen.dd-dimall::after {
+  opacity: 0.18;
+}
+
+.dd-screen.dd-dimall {
+  box-shadow: inset 0 0 9999px rgba(0, 0, 0, 0.75);
+  transition: box-shadow 180ms ease;
+}
+
+.dd-screen.dd-dimall .dd-terminal {
+  opacity: 0.18;
+  filter: blur(1px);
+  transition: opacity 180ms ease, filter 180ms ease;
+}
+
+.dd-screen.dd-dimall .dd-status {
+  opacity: 1;
+  filter: none;
+  pointer-events: auto;
+}
+
+.dd-screen.dd-dimall .dd-drawer {
+  opacity: 1 !important;
+  filter: none !important;
+  pointer-events: auto !important;
+}
+
+/* CRT scanlines + noise */
+.dd-screen::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.028),
+    rgba(255, 255, 255, 0.028) 1px,
+    rgba(0, 0, 0, 0) 3px,
+    rgba(0, 0, 0, 0) 6px
+  );
+  opacity: 0.55;
+  mix-blend-mode: overlay;
+}
+
+.dd-screen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px);
+  background-size: 3px 3px;
+  opacity: 0.06;
+  filter: blur(0.2px);
+}
+
+.dd-terminal,
+.dd-commandbar,
+.dd-status,
+.dd-drawer,
+.dd-topbar {
+  position: relative;
+  z-index: 2;
+}
+
+/* ====== Top bar ====== */
+.dd-topbar {
+  position: fixed;
+  top: 10px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  pointer-events: none;
+}
+
+.dd-topbar .dd-top-left,
+.dd-topbar .dd-top-right {
+  pointer-events: auto;
+}
+
+/* IMPORTANT: scope dd-brand to topbar ONLY (prevents terminal line collisions) */
+.dd-topbar .dd-brand {
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+.dd-phase {
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.08em;
+}
+
+.dd-terminal {
+  height: 100vh;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+
+  /* Keep left padding as-is */
+  padding: var(--dd-pad-top) 16px var(--dd-pad-btm);
+
+  /* Desktop: add a guaranteed right gutter so content never hugs scrollbar */
+  padding-right: var(--dd-right-gutter);
+
+  /* Helps Chromium reserve space when scrollbars appear */
+  scrollbar-gutter: stable both-edges;
+}
+
+/* v0.1.8: terminal inner width should not squeeze on mobile */
+.dd-terminal .dd-line {
+  max-width: 980px;
+  font-size: var(--dd-font);
+  line-height: var(--dd-lineh);
+}
+
+/* ====== Terminal text lines ======
+   Terminal-grade wrapping:
+   - timestamp is a fixed left gutter
+   - message wraps under message column (never under timestamp)
+   ================================ */
+.dd-line {
+  display: grid;
+  grid-template-columns: var(--dd-ts-min) minmax(0, 1fr);
+
+  /* Bigger desktop separation so timestamp + message never feel cramped */
+  column-gap: 22px;
+
+  align-items: start;
+  white-space: normal;
+  font-weight: 400;
+}
+
+/* Timestamp (never bold, always aligned) */
+.dd-ts {
+  white-space: nowrap;
+  font-weight: 400 !important;
+  color: var(--text-dim);
+}
+
+/* Message column must be allowed to shrink (prevents overflow on small screens) */
+.dd-text {
+  min-width: 0;
+  white-space: pre-wrap; /* keep your pre-wrap behavior for content */
+}
+
+/* Line kinds */
+.dd-sys .dd-text {
+  color: rgba(245, 245, 245, 0.62);
+}
+
+.dd-info .dd-text {
+  color: var(--cyan);
+}
+
+.dd-ok .dd-text {
+  color: var(--green);
+}
+
+.dd-warn .dd-text {
+  color: var(--yellow);
+}
+
+.dd-err .dd-text {
+  color: var(--red);
+  text-decoration: underline;
+}
+
+.dd-cmd .dd-text {
+  color: rgba(245, 245, 245, 0.92);
+  font-weight: 700;
+}
+
+/* Brand lines (USDDD orange) — text only, not whole line */
+.dd-brand .dd-text {
+  color: var(--usddd2);
+  font-weight: 900;
+  letter-spacing: 0.02em;
+}
+
+/* Ensure brand never affects timestamps */
+.dd-brand .dd-ts {
+  font-weight: 400 !important;
+}
+
+/* Inline command tokens (typeable words) */
+.dd-cmdtok {
+  color: var(--usddd2);
+  font-weight: 900;
+}
+
+/* Inline coloured segments (for 2-tone ASCII art, still supported) */
+.dd-seg-o {
+  color: var(--usddd2);
+  font-weight: 900;
+}
+
+.dd-seg-w {
+  color: rgba(255, 255, 255, 0.95);
+  font-weight: 900;
+}
+
+/* Inline positive value tokens (status values, balances, VERIFIED, AVAILABLE) */
+.dd-seg-g {
+  color: var(--green) !important;
+  font-weight: 900;
+  text-shadow: 0 0 10px rgba(60, 255, 138, 0.28);
+}
+
+/* ====== Bottom-left CONTROLS pill ====== */
+.dd-status {
+  position: fixed;
+  left: 12px;
+  bottom: 64px;
+  z-index: 70;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+
+  padding: 10px 14px;
+  border-radius: 999px;
+
+  border: 1px solid rgba(255, 138, 31, 0.55);
+  background: linear-gradient(180deg, rgba(255, 154, 64, 0.95), rgba(255, 122, 20, 0.92));
+
+  color: #0b0b0b;
+  cursor: pointer;
+
+  letter-spacing: 0.14em;
+  font-size: 13px;
+  font-weight: 800;
+
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.18) inset,
+    0 10px 30px rgba(0, 0, 0, 0.65),
+    0 0 22px rgba(255, 138, 31, 0.55);
+
+  user-select: none;
+  touch-action: manipulation;
+}
+
+.dd-status:hover {
+  color: #000000;
+  filter: brightness(1.08);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.35) inset,
+    0 14px 36px rgba(0, 0, 0, 0.7),
+    0 0 30px rgba(255, 138, 31, 0.85);
+}
+
+.dd-status:active {
+  transform: translateY(1px) scale(0.98);
+}
+
+.dd-status:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.24);
+  outline-offset: 2px;
+}
+
+.dd-statuslabel {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  opacity: 0.9;
+  text-transform: uppercase;
+}
+
+.dd-status::after {
+  content: "▸";
+  opacity: 0.55;
+  transform: translateY(-0.5px);
+}
+
+.dd-status[aria-expanded="true"]::after {
+  content: "▾";
+  opacity: 0.75;
+}
+
+/* Pulsing dots */
+.dd-dots span {
+  display: inline-block;
+  width: 0.35em;
+  text-align: center;
+  opacity: 0.25;
+  animation: ddDot 1s infinite ease-in-out;
+}
+
+.dd-dots span:nth-child(2) {
+  animation-delay: 0.12s;
+}
+
+.dd-dots span:nth-child(3) {
+  animation-delay: 0.24s;
+}
+
+@keyframes ddDot {
+  0%,
+  100% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 0.95;
+  }
+}
+
+/* ====== Control Panel drawer ====== */
+.dd-drawer {
+  position: fixed;
+  left: 12px;
+  bottom: 86px;
+  z-index: 65;
+
+  width: min(380px, calc(100vw - 24px));
+  height: 210px;
+
+  display: none;
+  grid-template-rows: auto 1fr;
+
+  border: 1px solid rgba(255, 138, 31, 0.35);
+  border-radius: 22px;
+
+  background: linear-gradient(180deg, rgba(70, 70, 70, 0.46) 0%, rgba(12, 12, 12, 0.46) 100%);
+  box-shadow:
+    0 18px 70px rgba(0, 0, 0, 0.72),
+    0 0 32px rgba(255, 138, 31, 0.25);
+
+  transform: translateY(10px);
+  opacity: 0;
+  transition: transform 180ms ease, opacity 180ms ease;
+}
+
+.dd-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 64;
+  background: rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(0.8px);
+}
+
+.dd-drawer.is-open {
+  display: grid;
+  transform: translateY(0);
+  opacity: 1;
+}
+
+.dd-drawer-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 12px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.dd-drawer-title {
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(245, 245, 245, 0.92);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dd-gear {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: rgba(245, 245, 245, 0.78);
+  cursor: pointer;
+  width: 26px;
+  height: 26px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  line-height: 1;
+  transition: background 120ms ease, color 120ms ease, transform 120ms ease;
+  touch-action: manipulation;
+}
+
+.dd-gear:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(245, 245, 245, 0.92);
+  transform: translateY(-1px);
+}
+
+.dd-gear.is-on {
+  background: rgba(255, 138, 31, 0.14);
+  color: rgba(255, 198, 150, 0.95);
+}
+
+.dd-consoles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dd-chip {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(245, 245, 245, 0.92);
+  padding: 6px 10px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+  touch-action: manipulation;
+}
+
+.dd-chip:hover {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.07);
+  transform: translateY(-1px);
+}
+
+.dd-chip.is-active {
+  border-color: rgba(255, 255, 255, 0.36);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.dd-balance {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: rgba(245, 245, 245, 0.86);
+}
+
+.dd-balance-text {
+  white-space: nowrap;
+}
+
+.dd-drawer-body {
+  padding: 10px 12px 12px;
+  overflow: hidden;
+}
+
+.dd-menu {
+  height: 100%;
+  display: grid;
+  grid-auto-rows: min-content;
+  gap: 8px;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) rgba(255, 255, 255, 0.03);
+}
+
+.dd-menu::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+
+.dd-menu::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+}
+
+.dd-menu::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 999px;
+}
+
+.dd-menu-item {
+  width: 100%;
+  text-align: left;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(0, 0, 0, 0.18);
+  color: rgba(245, 245, 245, 0.90);
+  padding: 10px 12px;
+  border-radius: 14px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+  touch-action: manipulation;
+}
+
+.dd-menu-item:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  transform: translateY(-1px);
+}
+
+.dd-menu-item:active {
+  transform: translateY(0px);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* ====== Bottom command row ====== */
+.dd-command {
+  position: fixed;
+  left: var(--dd-chrome-x);
+  right: var(--dd-chrome-x);
+  bottom: var(--dd-chrome-btm);
+  z-index: 60;
+
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--dd-controls-gap);
+  align-items: center;
+
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.6);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.65);
+}
+
+/* Desktop: keep bar full-width, but inset its CONTENT away from scrollbar */
+@media (min-width: 521px) {
+  .dd-command {
+    padding-right: 34px; /* matches .dd-terminal padding-right */
+  }
+}
+
+.dd-command-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: rgba(230, 230, 230, 0.85);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.dd-prompt {
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+
+.dd-promptstate {
+  opacity: 0.72;
+}
+
+.dd-scrolllock {
+  opacity: 0.72;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  padding: 3px 6px;
+  border-radius: 999px;
+}
+
+.dd-command-input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(10, 10, 10, 0.75);
+  color: rgba(230, 230, 230, 0.95);
+  padding: 10px 10px;
+  font-size: 16px;
+  outline: none;
+}
+
+.dd-command-input:focus {
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.dd-command-send {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(230, 230, 230, 0.92);
+  padding: 10px 10px;
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.dd-command-send:hover {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* USDDD mini icon (pill + drawer balance) */
+.dd-usdddicon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: radial-gradient(circle at 30% 30%, var(--usddd2), var(--usddd));
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.10) inset, 0 6px 16px rgba(0, 0, 0, 0.35);
+  flex: 0 0 auto;
+}
+
+.dd-usdddicon::before {
+  content: "Ƀ";
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+  color: #ffffff;
+  transform: translateY(-0.3px);
+}
+
+/* Always-visible version badge */
+.dd-version-fixed {
+  position: fixed;
+  top: 10px;
+  left: 12px;
+  z-index: 50;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.55);
+  text-transform: uppercase;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* Cursor */
+.dd-cursor {
+  padding: 4px 0 10px 0;
+  color: rgba(214, 255, 255, 0.92);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  animation: dd-cursor-blink 1s steps(1, end) infinite;
+}
+
+@keyframes dd-cursor-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* v0.1.x — dock CONTROLS pill into the bottom command row */
+.dd-command .dd-status {
+  position: static !important;
+  left: auto !important;
+  bottom: auto !important;
+  z-index: auto !important;
+  transform: none !important;
+  margin: 0 !important;
+
+  /* v0.1.8: give the docked pill a tiny presence again */
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.10) inset !important;
+}
+
+/* =========================================
+   v0.1.8 MOBILE POLISH (NO DESKTOP REGRESS)
+   ========================================= */
+@media (max-width: 520px) {
+  :root {
+    --dd-font: 16px;
+    --dd-lineh: 1.62;
+    --dd-ts-min: 72px;
+
+    --dd-pad-top: calc(48px + env(safe-area-inset-top));
+    --dd-pad-btm: calc(150px + env(safe-area-inset-bottom));
+
+    --dd-chrome-x: 10px;
+    --dd-chrome-btm: calc(10px + env(safe-area-inset-bottom));
+    --dd-controls-gap: 8px;
+  }
+
+  .dd-terminal {
+    padding-left: 12px;
+    padding-right: 12px; /* override desktop gutter */
+  }
+
+  .dd-terminal .dd-line {
+    max-width: 100%;
+  }
+
+  .dd-line {
+    column-gap: 10px !important;
+  }
+
+  .dd-ts {
+    font-size: 12px;
+    opacity: 0.8;
+    padding-right: 0;
+  }
+
+  /* Command bar becomes 2-row: metadata above, input row below */
+  .dd-command {
+    padding: 10px 10px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    align-items: stretch;
+  }
+
+  .dd-command-left {
+    grid-column: 1 / 3;
+    grid-row: 1;
+    gap: 8px;
+    font-size: 12px;
+    opacity: 0.92;
+
+    flex-wrap: wrap;
+    white-space: normal;
+    row-gap: 6px;
+  }
+
+  .dd-promptstate,
+  .dd-scrolllock {
+    opacity: 0.65;
+  }
+
+  .dd-command-input {
+    grid-column: 1 / 2;
+    grid-row: 2;
+    padding: 12px 10px;
+  }
+
+  .dd-command-send {
+    grid-column: 2 / 3;
+    grid-row: 2;
+    padding: 12px 10px;
+    font-size: 12px;
+  }
+
+  .dd-status {
+    padding: 9px 12px;
+    font-size: 12px;
+  }
+
+  .dd-statuslabel {
+    font-size: 10px;
+  }
+
+  .dd-drawer {
+    left: 10px;
+    width: calc(100vw - 20px);
+    bottom: calc(86px + env(safe-area-inset-bottom));
+    height: min(360px, 62vh);
+    border-radius: 20px;
+  }
+
+  .dd-drawer-top {
+    padding: 12px 12px 10px;
+  }
+
+  .dd-chip {
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+
+  .dd-menu-item {
+    padding: 12px 12px;
+    font-size: 13px;
+  }
+
+  .dd-backdrop {
+    background: rgba(0, 0, 0, 0.22);
+    backdrop-filter: blur(1px);
+  }
+
+  .dd-version-fixed {
+    font-size: 11px;
+    opacity: 0.85;
+  }
+}
+
+/* Tiny-phone guardrail */
+@media (max-width: 380px) {
+  :root {
+    --dd-ts-min: 64px;
+    --dd-font: 15px;
+  }
+
+  .dd-statuslabel {
+    letter-spacing: 0.14em;
+  }
+}
+
+/* =========================================================
+   FINAL: Desktop command row right gutter (guaranteed)
+   Pulls the whole bar left so it never hugs the scrollbar.
+   ========================================================= */
+@media (min-width: 521px) {
+  .dd-command {
+    right: calc(var(--dd-chrome-x) + var(--dd-right-gutter)) !important;
+  }
 }
