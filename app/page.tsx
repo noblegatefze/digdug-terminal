@@ -2002,7 +2002,7 @@ const sponsorActivate = () => {
     }
 
     setCampaigns((prev) => prev.map((x) => (x.id === c.id ? { ...x, status: "ACTIVE", stage: "CONFIGURED" } : x)));
-    sendStat("box_activate", { box_id: box.id, chain: box.deployChainId, token_symbol: box.tokenSymbol ?? null });
+    sendStat("box_activate", { box_id: c.id, chain: c.deployChainId, token_symbol: c.tokenSymbol ?? null });
     emit("ok", "Box activated.");
   };
 
