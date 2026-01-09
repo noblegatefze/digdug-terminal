@@ -115,13 +115,11 @@ body {
   inset: 0;
   pointer-events: none;
   z-index: 1;
-  background: repeating-linear-gradient(
-    to bottom,
-    rgba(255, 255, 255, 0.028),
-    rgba(255, 255, 255, 0.028) 1px,
-    rgba(0, 0, 0, 0) 3px,
-    rgba(0, 0, 0, 0) 6px
-  );
+  background: repeating-linear-gradient(to bottom,
+      rgba(255, 255, 255, 0.028),
+      rgba(255, 255, 255, 0.028) 1px,
+      rgba(0, 0, 0, 0) 3px,
+      rgba(0, 0, 0, 0) 6px);
   opacity: 0.55;
   mix-blend-mode: overlay;
 }
@@ -228,7 +226,8 @@ body {
 /* Message column must be allowed to shrink (prevents overflow on small screens) */
 .dd-text {
   min-width: 0;
-  white-space: pre-wrap; /* keep your pre-wrap behavior for content */
+  white-space: pre-wrap;
+  /* keep your pre-wrap behavior for content */
 }
 
 /* Line kinds */
@@ -381,10 +380,12 @@ body {
 }
 
 @keyframes ddDot {
+
   0%,
   100% {
     opacity: 0.2;
   }
+
   50% {
     opacity: 0.95;
   }
@@ -601,7 +602,8 @@ body {
 /* Desktop: keep bar full-width, but inset its CONTENT away from scrollbar */
 @media (min-width: 521px) {
   .dd-command {
-    padding-right: 34px; /* matches .dd-terminal padding-right */
+    padding-right: 34px;
+    /* matches .dd-terminal padding-right */
   }
 }
 
@@ -663,7 +665,7 @@ body {
   background: rgba(255, 255, 255, 0.1);
 }
 
-/* USDDD mini icon (pill + drawer balance) */
+/* USDDD mini icon (pill + drawer balance) — now uses DIGDUG icon.png */
 .dd-usdddicon {
   position: relative;
   display: inline-flex;
@@ -672,19 +674,21 @@ body {
   width: 18px;
   height: 18px;
   border-radius: 999px;
-  background: radial-gradient(circle at 30% 30%, var(--usddd2), var(--usddd));
-  border: 1px solid rgba(0, 0, 0, 0.35);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.10) inset, 0 6px 16px rgba(0, 0, 0, 0.35);
+  background: transparent;
+  border: none;
+  box-shadow: none;
   flex: 0 0 auto;
 }
 
 .dd-usdddicon::before {
-  content: "Ƀ";
-  font-size: 12px;
-  font-weight: 900;
-  line-height: 1;
-  color: #ffffff;
-  transform: translateY(-0.3px);
+  content: "";
+  width: 18px;
+  height: 18px;
+  background-image: url("/icon.png");
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  display: block;
 }
 
 /* Always-visible version badge */
@@ -711,6 +715,7 @@ body {
 }
 
 @keyframes dd-cursor-blink {
+
   0%,
   49% {
     opacity: 1;
@@ -754,7 +759,8 @@ body {
 
   .dd-terminal {
     padding-left: 12px;
-    padding-right: 12px; /* override desktop gutter */
+    padding-right: 12px;
+    /* override desktop gutter */
   }
 
   .dd-terminal .dd-line {
@@ -871,4 +877,19 @@ body {
   .dd-command {
     right: calc(var(--dd-chrome-x) + var(--dd-right-gutter)) !important;
   }
+}
+
+/* FORCE DIGDUG icon for USDDD + CONTROLS (override) */
+.dd-usdddicon {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.dd-usdddicon::before {
+  content: "" !important;
+  width: 18px !important;
+  height: 18px !important;
+  background: url("/icon.png") center / contain no-repeat !important;
+  display: block !important;
 }
