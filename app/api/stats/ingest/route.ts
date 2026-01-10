@@ -15,14 +15,6 @@ function env(name: string) {
   return v;
 }
 
-const MOCK_USD_PRICE: Record<string, number> = {
-  SAND: 0.50,
-  THOR: 2.25,
-  ENRG: 0.12,
-  MEME: 0.01,
-  CAKE: 3.10,
-};
-
 function toNum(v: any): number | null {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
@@ -38,8 +30,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Invalid JSON" }, { status: 400 });
     }
 
-    const install_id = String((body as any).install_id ?? "").trim();
-    const event = String((body as any).event ?? "").trim();
+    const install_id = String(body.install_id ?? "").trim();
+    const event = String(body.event ?? "").trim();
 
     if (!install_id || install_id.length < 8) {
       return NextResponse.json({ ok: false, error: "install_id required" }, { status: 400 });
@@ -48,29 +40,22 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "invalid event" }, { status: 400 });
     }
 
-    const rewardAmount = toNum((body as any).reward_amount);
-    const priced = Boolean((body as any).priced);
-    const tokenSymbol = (body as any).token_symbol ?? null;
-
-    const priceUsd =
-      priced && tokenSymbol && typeof tokenSymbol === "string"
-        ? (MOCK_USD_PRICE[tokenSymbol.toUpperCase()] ?? null)
-        : null;
-
-    const valueUsd =
-      priceUsd !== null && rewardAmount !== null ? rewardAmount * priceUsd : null;
+    // TRUST FRONTEND SNAPSHOT (Phase Zero rule)
+    const rewardAmount = toNum(body.reward_amount);
+    const rewardPriceUsd = toNum(body.reward_price_usd);
+    const rewardValueUsd = toNum(body.reward_value_usd);
 
     const payload = {
       install_id,
       event,
-      box_id: (body as any).box_id ?? null,
-      chain: (body as any).chain ?? null,
-      token_symbol: tokenSymbol,
-      usddd_cost: (body as any).usddd_cost ?? null,
+      box_id: body.box_id ?? null,
+      chain: body.chain ?? null,
+      token_symbol: body.token_symbol ?? null,
+      usddd_cost: toNum(body.usddd_cost),
       reward_amount: rewardAmount,
-      priced,
-      reward_price_usd: priceUsd,
-      reward_value_usd: valueUsd,
+      priced: rewardValueUsd != null,
+      reward_price_usd: rewardPriceUsd,
+      reward_value_usd: rewardValueUsd,
     };
 
     const r = await fetch(`${url}/rest/v1/stats_events`, {
@@ -86,11 +71,17 @@ export async function POST(req: Request) {
 
     if (!r.ok) {
       const txt = await r.text().catch(() => "");
-      return NextResponse.json({ ok: false, error: "insert_failed", detail: txt.slice(0, 200) }, { status: 500 });
+      return NextResponse.json(
+        { ok: false, error: "insert_failed", detail: txt.slice(0, 200) },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({ ok: true });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message ?? "server_error" }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: e?.message ?? "server_error" },
+      { status: 500 }
+    );
   }
 }
