@@ -26,6 +26,7 @@ type TermLine = { id: string; t: string; console?: ConsoleMode; kind: LineKind; 
 type PromptMode =
   | "IDLE"
   | "HELP_SELECT"
+  | "DOCS_SELECT"
   | "CONFIRM_NUKE"
   | "REG_USER"
   | "REG_PASS"
@@ -269,7 +270,7 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.1.13.2";
+const BUILD_VERSION = "Zero Phase v0.1.13.3";
 
 // local storage keys
 const STORAGE_KEY_PASS = "dd_terminal_pass_v1";
@@ -745,13 +746,13 @@ export default function Page() {
           ts: Date.now(),
           ...payload,
         }),
-      }).catch(() => {});
+      }).catch(() => { });
     } catch {
       // ignore
     }
   };
 
-  const fetchAndPrintGlobalStats = async () => {
+  const fetchAndPrintGlobalPulse = async () => {
     emit("sys", "Fetching global stats...");
     try {
       const r = await fetch("/api/stats/summary", { method: "GET" });
@@ -761,29 +762,74 @@ export default function Page() {
       }
       const data = (await r.json()) as any;
 
-      emit("info", "GLOBAL STATS (Zero Phase)");
-      emit("sys", `• Total sessions: ${data.total_sessions ?? "N/A"}`);
-      emit("sys", `• Active now (last 5m): ${data.active_now_5m ?? "N/A"}`);
-      emit("sys", `• Daily testers (today): ${data.daily_active ?? "N/A"}`);
+      const attempts = Number(data.digs_attempted ?? 0);
+      const finds = Number(data.digs_succeeded ?? 0);
+      const rejected = Math.max(0, attempts - finds);
+      const rate = attempts > 0 ? (finds / attempts) * 100 : 0;
 
-      emit("sys", `• Digs attempted: ${data.digs_attempted ?? "N/A"}`);
-      emit("sys", `• Digs succeeded: ${data.digs_succeeded ?? "N/A"}`);
-      if (data.usddd_spent != null) emit("sys", `• USDDD spent: ${Number(data.usddd_spent).toFixed(2)}`);
-      else emit("sys", `• USDDD spent: N/A`);
+      const usdddSpent = data.usddd_spent != null ? Number(data.usddd_spent) : null;
+      const withdrawals = data.withdrawals ?? "N/A";
 
-      emit("sys", `• Withdrawals: ${data.withdrawals ?? "N/A"}`);
+      emit("info", "GLOBAL PULSE — ZERO PHASE PUBLIC TESTNET");
+      emit("sys", "");
 
-      if (Array.isArray(data.top_boxes) && data.top_boxes.length > 0) {
-        emit("info", "Top boxes (by digs):");
-        data.top_boxes.forEach((b: any, i: number) => {
-          emit("sys", `${i + 1}) ${b.box_id ?? "?"} (${b.chain ?? "?"}) — ${b.digs ?? "?"}`);
-        });
+      emit("info", "NETWORK");
+      emit("sys", `Sessions: ${data.total_sessions ?? "N/A"}`);
+      emit("sys", `Active now (5m): ${data.active_now_5m ?? "N/A"}`);
+      emit("sys", `Daily diggers (today): ${data.daily_active ?? "N/A"}`);
+      emit("sys", "");
+
+      emit("info", "DIGGING");
+      emit("sys", `Dig attempts: ${attempts}`);
+      emit("sys", `Finds: ${finds}`);
+      emit("sys", `Find rate: ${rate.toFixed(2)}%`);
+      if (rejected > 0) emit("sys", `Rejected digs: ${rejected}`);
+      emit("sys", "");
+
+      emit("info", "FUEL");
+      emit("sys", `USDDD spent: ${usdddSpent == null ? "N/A" : usdddSpent.toFixed(2)}`);
+      if (usdddSpent != null) {
+        const avg = attempts > 0 ? usdddSpent / attempts : 0;
+        emit("sys", `Avg fuel / attempt: ${avg.toFixed(2)}`);
+      }
+      emit("sys", `Withdrawals: ${withdrawals}`);
+      emit("sys", "");
+
+      // Optional extended fields (if DB function includes them)
+      const bc = data.boxes_created;
+      const ba = data.boxes_activated;
+      const bl = data.boxes_live_now;
+      const bt = data.boxes_touched_24h;
+      if (bc != null || ba != null || bl != null || bt != null) {
+        emit("info", "BOXES");
+        if (bc != null) emit("sys", `Boxes created: ${bc}`);
+        if (ba != null) emit("sys", `Boxes activated: ${ba}`);
+        if (bl != null) emit("sys", `Boxes live now: ${bl}`);
+        if (bt != null) emit("sys", `Boxes touched (24h): ${bt}`);
+        emit("sys", "");
       }
 
-      if (data.price_priced != null || data.price_na != null) {
-        emit("info", "Price coverage:");
-        emit("sys", `• Priced digs: ${data.price_priced ?? 0}`);
-        emit("sys", `• N/A digs: ${data.price_na ?? 0}`);
+      const rt = data.rewards_claimed_tokens_total;
+      const ru = data.rewards_priced_usd_total;
+      const pricedCount = data.price_priced;
+      const naCount = data.price_na;
+
+      if (rt != null || ru != null || pricedCount != null || naCount != null) {
+        emit("info", "REWARDS");
+        if (rt != null) emit("sys", `Total rewards claimed (tokens): ${Number(rt).toFixed(2)}`);
+        if (ru != null) emit("sys", `Rewards with price: $${Number(ru).toFixed(2)}`);
+        if (naCount != null) emit("sys", `Rewards N/A: ${naCount} finds`);
+        emit("sys", "");
+      }
+
+      if (Array.isArray(data.top_boxes) && data.top_boxes.length > 0) {
+        emit("info", "HOT BOXES (by digs)");
+        data.top_boxes.slice(0, 5).forEach((b: any, i: number) => {
+          const bid = b.box_id ?? "?";
+          const ch = b.chain ?? "?";
+          const digs = b.digs ?? "?";
+          emit("sys", `${i + 1}) ${bid} (${ch}) — ${digs} digs`);
+        });
       }
     } catch {
       emit("warn", "Global stats unavailable.");
@@ -980,7 +1026,9 @@ export default function Page() {
   const requirePass = () => {
     if (terminalPass) return true;
     emit("warn", "TERMINAL PASS REQUIRED");
-    emit("info", `Next: ${C("register")}  •  or  •  ${C("login")}`);
+    emit("info", "NEXT");
+    emit("sys", `Next: ${C("register")}`);
+    emit("sys", `Or: ${C("login")}`);
     return false;
   };
   const require2FAEnabled = () => {
@@ -1161,7 +1209,9 @@ export default function Page() {
     if (!requirePass()) return;
     if (!activeWallet) {
       emit("info", `Wallet: DISCONNECTED`);
-      emit("info", `Next: ${C("wallet connect")}  •  or  •  ${C("wallet list")}`);
+      emit("info", "NEXT");
+      emit("sys", `Next: ${C("wallet connect")}`);
+      emit("sys", `Or: ${C("wallet list")}`);
       return;
     }
     emit("info", `Wallet: ${G("CONNECTED")} • ${G(activeWallet.label)} • ${G(chainLabel(activeWallet.chainId))}`);
@@ -1314,11 +1364,17 @@ export default function Page() {
   };
 
   const doDocs = () => {
-    emit("info", "Docs (GitHub):");
-    emit("info", `GENESIS: ${DOCS.genesis}`);
-    emit("info", `WHITEPAPER: ${DOCS.whitepaper}`);
-    emit("info", `USDDD MONETARY POLICY: ${DOCS.monetary}`);
-    emit("info", `TERMINOLOGY GLOSSARY: ${DOCS.glossary}`);
+    emit("info", "DOCS");
+    emit("sys", "");
+    emit("sys", `1) Genesis`);
+    emit("sys", `2) Whitepaper`);
+    emit("sys", `3) Monetary Policy`);
+    emit("sys", `4) Glossary`);
+    emit("sys", "");
+    emit("info", "NEXT");
+    emit("sys", "Type a number to open");
+    emit("sys", `Or: ${C("cancel")}`);
+    setPrompt({ mode: "DOCS_SELECT" });
   };
 
   const doStatus = () => {
@@ -1362,60 +1418,141 @@ export default function Page() {
   // boot
   useEffect(() => {
     if (!passLoaded) return;
+
     emit("sys", `DIGDUG.DO Terminal — ${BUILD_VERSION}`);
-    emit("sys", "ready - starting session (volatile)");
+    emit("sys", "starting session (volatile)");
     emit("info", `Session ID: ${sessionId}`);
-    emit("info", `Started: ${new Date(sessionStartedAt).toLocaleString()}`);
-    emit("info", "Phase: Zero");
-    emit("info", "Console: USER");
-    emit("info", `Hint: type ${C("help")} or ${C("commands")}`);
+
     sendStat("session_start");
+
+    // Entry / load UX (intuitive)
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY_PASS);
+      const hasPass = !!raw;
+      if (hasPass) {
+        const tp = JSON.parse(raw || "{}") as TerminalPass;
+        const u = tp?.username ? String(tp.username) : "UNKNOWN";
+        emit("sys", "");
+        emit("ok", `Welcome back: ${G(u)}`);
+        emit("info", "NEXT");
+        emit("sys", `Next: ${C("user")}`);
+        emit("sys", `Or: ${C("sponsor")}`);
+      } else {
+        emit("sys", "");
+        emit("warn", "TERMINAL PASS REQUIRED");
+        emit("info", "NEXT");
+        emit("sys", `Next: ${C("register")}`);
+        emit("sys", `Or: ${C("login")}`);
+      }
+    } catch {
+      emit("sys", "");
+      emit("warn", "TERMINAL PASS REQUIRED");
+      emit("info", "NEXT");
+      emit("sys", `Next: ${C("register")}`);
+      emit("sys", `Or: ${C("login")}`);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [passLoaded]);
 
-  const printHelpNarrative = (m: ConsoleMode) => {
+  const printHelpContext = (m: ConsoleMode) => {
     if (m === "USER") {
-      emit("info", "USER console:");
-      emit("sys", "  • Terminal Pass required.");
-      emit("sys", "  • USDDD is fuel: allocated (capped) + acquired (withdrawable).");
-      emit("sys", "  • Every DIG yields treasure (always-success).");
-      emit("sys", "  • Withdraw requires 2FA + wallet. User pays network gas.");
+      emit("info", "USER CONSOLE");
+      emit("sys", "");
+      emit("sys", "You are in USER mode.");
+      emit("sys", "");
+      emit("info", "DIGGING");
+      emit("sys", "Fuel is spent to dig boxes.");
+      emit("sys", "Rewards are discovered and withdrawn.");
+      emit("sys", "");
+      emit("info", "RULES");
+      emit("sys", "Cooldowns may apply.");
+      emit("sys", "Some boxes limit digs per user.");
+      emit("sys", "");
+      emit("info", "NEXT");
+      emit("sys", `Next: ${C("dig")}`);
+      emit("sys", `Or: ${C("docs")}`);
       return;
     }
+
     if (m === "SPONSOR") {
-      emit("info", "SPONSOR console:");
-      emit("sys", "  • create box → hard gate → chain deploy → bind token → deposit → configure → activate.");
-      emit("sys", "  • set limit controls max digs per user per box (1 = one-time).");
-      emit("sys", "  • DIGDUG earns USDDD only. Sponsor pays deployment gas. No custody.");
+      emit("info", "SPONSOR CONSOLE");
+      emit("sys", "");
+      emit("sys", "You are in SPONSOR mode.");
+      emit("sys", "");
+      emit("info", "BOX FLOW");
+      emit("sys", "Create a box.");
+      emit("sys", "Fund it with tokens.");
+      emit("sys", "Set cost and limits.");
+      emit("sys", "Activate when ready.");
+      emit("sys", "");
+      emit("info", "RULES");
+      emit("sys", "Boxes must be funded.");
+      emit("sys", "Limits are enforced automatically.");
+      emit("sys", "");
+      emit("info", "NEXT");
+      emit("sys", `Next: ${C("create box")}`);
+      emit("sys", `Or: ${C("docs")}`);
       return;
     }
-    emit("info", "ADMIN console:");
-    emit("sys", "  • view stats + reset local state (mock).");
+
+    emit("info", "ADMIN CONSOLE");
+    emit("sys", "");
+    emit("sys", "Admin commands only.");
   };
 
   const printCommands = (m: ConsoleMode) => {
-    const bullet = "•";
-    emit("info", `${m} commands:`);
+  if (m === "USER") {
+    emit("info", "USER COMMANDS");
+    emit("sys", "");
+    emit("sys", `${C("dig")}        ${C("rewards")}`);
+    emit("sys", `${C("claim")}      ${C("acquire")}`);
+    emit("sys", `${C("withdraw")}   ${C("wallet")}`);
+    emit("sys", `${C("help")}       ${C("commands")}`);
+    emit("sys", `${C("docs")}       ${C("gstats")}`);
+    return;
+  }
 
+  if (m === "SPONSOR") {
+    emit("info", "SPONSOR COMMANDS");
+    emit("sys", "");
+    emit("sys", `${C("create box")}   ${C("boxes")}`);
+    emit("sys", `${C("activate")}     ${C("configure")}`);
+    emit("sys", `${C("fund box")}     ${C("wallet")}`);
+    emit("sys", `${C("help")}         ${C("commands")}`);
+    emit("sys", `${C("docs")}         ${C("gstats")}`);
+    return;
+  }
+
+  emit("info", "ADMIN COMMANDS");
+  emit("sys", "");
+  emit("sys", `${C("gstats")}   ${C("stats")}`);
+  emit("sys", `${C("nuke")}     ${C("reset")}`);
+};
+
+  const printConsoleStatus = (m: ConsoleMode) => {
     if (m === "USER") {
-      emit("sys", `  ${C("register")} ${bullet} ${C("login")} ${bullet} ${C("logout")} ${bullet} ${C("whoami")}`);
-      emit("sys", `  ${C("wallet")} ${bullet} ${C("wallet list")} ${bullet} ${C("wallet connect")} ${bullet} ${C("wallet switch")} ${bullet} ${C("wallet forget")} ${bullet} ${C("wallet disconnect")}`);
-      emit("sys", `  ${C("allocate usddd")} ${bullet} ${C("acquire usddd")}`);
-      emit("sys", `  ${C("dig")} ${bullet} ${C("dig history")} ${bullet} ${C("rewards")} ${bullet} ${C("withdraw")}`);
-      emit("sys", `  ${C("2fa")} ${bullet} ${C("status")} ${bullet} ${C("docs")} ${bullet} ${C("clear")} ${bullet} ${C("menu")}`);
+      emit("info", "USER CONSOLE");
+      emit("sys", "");
+      emit("sys", "You are ready to dig.");
+      emit("sys", "");
+      emit("info", "NEXT");
+      emit("sys", `Next: ${C("dig")}`);
+      emit("sys", `Or: ${C("help")}`);
       return;
     }
-
     if (m === "SPONSOR") {
-      emit("sys", `  ${C("create box")} ${bullet} ${C("my boxes")} ${bullet} ${C("use box")} ${bullet} ${C("box")}`);
-      emit("sys", `  ${C("bind token")} ${bullet} ${C("deposit")} ${bullet} ${C("configure")} ${bullet} ${C("activate")} ${bullet} ${C("deactivate")}`);
-      emit("sys", `  ${C("set cost")} ${bullet} ${C("set cooldown")} ${bullet} ${C("set reward")} ${bullet} ${C("set limit")} ${bullet} ${C("set meta")}`);
-      emit("sys", `  ${C("box stats")} ${bullet} ${C("claim history")}`);
-      emit("sys", `  ${C("wallet")} ${bullet} ${C("wallet connect")} ${bullet} ${C("2fa")} ${bullet} ${C("status")}`);
+      emit("info", "SPONSOR CONSOLE");
+      emit("sys", "");
+      emit("sys", "You can create and manage boxes.");
+      emit("sys", "");
+      emit("info", "NEXT");
+      emit("sys", `Next: ${C("create box")}`);
+      emit("sys", `Or: ${C("help")}`);
       return;
     }
-
-    emit("sys", `  ${C("stats")} ${bullet} ${C("reset")} ${bullet} ${C("price mock")} ${bullet} ${C("status")}`);
+    emit("info", "ADMIN CONSOLE");
+    emit("sys", "");
+    emit("sys", "Admin commands only.");
   };
 
   const switchConsole = (m: ConsoleMode) => {
@@ -1429,7 +1566,7 @@ export default function Page() {
     }
     consoleModeRef.current = m;
     setConsoleMode(m);
-    doStatus();
+    printConsoleStatus(m);
   };
 
   const start2FAEnroll = () => {
@@ -1989,7 +2126,7 @@ export default function Page() {
     return;
   };
 
-  
+
   const sponsorMetaMenu = (c: Campaign) => {
     const m = c.meta ?? {};
     const show = (v2?: string) => (v2 && v2.trim().length > 0 ? v2 : "N/A");
@@ -2027,7 +2164,7 @@ export default function Page() {
     sponsorMetaMenu(c);
   };
 
-const sponsorActivate = () => {
+  const sponsorActivate = () => {
     if (!requireSponsorConsole()) return;
     if (!require2FAEnabled()) return;
     if (!requireWallet()) return;
@@ -2183,7 +2320,7 @@ const sponsorActivate = () => {
     const recent = [...digHistoryRef.current].slice(-30).reverse();
     emit("info", `Dig history (last ${recent.length}):`);
     if (recent.length === 0) return void emit("info", "No digs yet.");
-        recent.forEach((r) => {
+    recent.forEach((r) => {
       const v2 = r.rewardUsdValue != null ? ` (~$${fmtUsdValue(r.rewardUsdValue)})` : "";
       emit("info", `• ${r.at} • ${r.label} • -${r.spentUSDDD} USDDD • ${r.rewardMode} +${r.rewardAmount.toFixed(6)} ${r.rewardSymbol}${v2}`);
     });
@@ -2203,6 +2340,7 @@ const sponsorActivate = () => {
     if (low === "status") return void doStatus();
     if (low === "docs") return void doDocs();
     if (low === "build") return void emit("sys", `BUILD: ${BUILD_VERSION}`);
+    if (low === "gstats") return void fetchAndPrintGlobalPulse();
 
     // mock price mode (admin/operator)
     if (low.startsWith("price mock")) {
@@ -2260,24 +2398,21 @@ const sponsorActivate = () => {
 
     // help
     if (low === "help" || low === "h") {
-      emit("info", "Help (roles):");
-      emit("info", `${C("1")}) USER  •  ${C("2")}) SPONSOR  •  ${C("3")}) ADMIN`);
-      emit("info", `Reply ${C("1")}, ${C("2")}, or ${C("3")}:`);
-      setPrompt({ mode: "HELP_SELECT" });
+      printHelpContext(consoleModeRef.current);
       return;
     }
     if (low === "commands" || low === "cmds") return void printCommands(consoleModeRef.current);
 
     // nuke (admin-only)
-if (low === "nuke" || low === "wipe") {
-  if (!requireAdminUser()) return;
-  emit("warn", "⚠️  DEV COMMAND: NUKE (erases local state)");
-  emit("info", `Type ${C("YES")} to confirm or ${C("NO")} to cancel.`);
-  setPrompt({ mode: "CONFIRM_NUKE" });
-  return;
-}
+    if (low === "nuke" || low === "wipe") {
+      if (!requireAdminUser()) return;
+      emit("warn", "⚠️  DEV COMMAND: NUKE (erases local state)");
+      emit("info", `Type ${C("YES")} to confirm or ${C("NO")} to cancel.`);
+      setPrompt({ mode: "CONFIRM_NUKE" });
+      return;
+    }
 
-// console switch
+    // console switch
     if (low === "user") return void switchConsole("USER");
     if (low === "sponsor") return void switchConsole("SPONSOR");
     if (low === "admin") return void switchConsole("ADMIN");
@@ -2291,6 +2426,11 @@ if (low === "nuke" || low === "wipe") {
     if (low === "logout") {
       setTerminalPass(null);
       emit("ok", "Logged out.");
+      emit("sys", "");
+      emit("warn", "TERMINAL PASS REQUIRED");
+      emit("info", "NEXT");
+      emit("sys", `Next: ${C("register")}`);
+      emit("sys", `Or: ${C("login")}`);
       return;
     }
     if (low === "register") {
@@ -2336,7 +2476,7 @@ if (low === "nuke" || low === "wipe") {
     }
 
     // econ
-    if (low === "allocate" || low === "allocate usddd" || low === "claim usddd") return void doAllocate();
+    if (low === "allocate" || low === "allocate usddd" || low === "claim usddd" || low === "claim") return void doAllocate();
     if (low === "acquire" || low === "acquire usddd" || low === "buy" || low === "buy usddd") {
       if (!requirePass()) return;
       emit("info", "Enter amount to acquire (USDDD):");
@@ -2356,7 +2496,7 @@ if (low === "nuke" || low === "wipe") {
 
     // sponsor
     if (low === "create box") return void startSponsorCreateBox();
-    if (low === "my boxes") return void sponsorListMyBoxes();
+    if (low === "my boxes" || low === "boxes") return void sponsorListMyBoxes();
     if (low === "use box") return void sponsorUseBoxPrompt();
     if (low === "box") {
       if (!requireSponsorConsole()) return;
@@ -2365,7 +2505,7 @@ if (low === "nuke" || low === "wipe") {
       return void sponsorBoxSummary(c);
     }
     if (low === "bind token") return void sponsorBindTokenStart();
-    if (low === "deposit" || low === "deposit box") return void sponsorDeposit();
+    if (low === "deposit" || low === "deposit box" || low === "fund box") return void sponsorDeposit();
     if (low === "configure") return void sponsorConfigureStart();
     if (low === "activate" || low === "resume box") return void sponsorActivate();
     if (low === "deactivate" || low === "pause box") return void sponsorDeactivate();
@@ -2438,11 +2578,16 @@ if (low === "nuke" || low === "wipe") {
       const totalDigs = digHistoryRef.current.length;
       const usdddUsed = digHistoryRef.current.reduce((a, r) => a + r.spentUSDDD, 0);
       const treasureClaimed = Object.values(treasureBalancesRef.current).reduce((a, v2) => a + v2, 0);
-      emit("info", "Public stats:");
-      emit("info", `• Total digs: ${totalDigs}`);
-      emit("info", `• USDDD used: ${usdddUsed.toFixed(2)}`);
-      emit("info", `• USDDD treasury: ${treasuryRef.current.toFixed(2)}`);
-      emit("info", `• Treasure claimed (holdings): ${treasureClaimed.toFixed(6)}`);
+
+      emit("info", "LOCAL STATS");
+      emit("sys", "");
+      emit("sys", `Dig attempts: ${totalDigs}`);
+      emit("sys", `USDDD spent: ${usdddUsed.toFixed(2)}`);
+      emit("sys", `USDDD treasury: ${treasuryRef.current.toFixed(2)}`);
+      emit("sys", `Rewards claimed (tokens): ${treasureClaimed.toFixed(2)}`);
+      emit("sys", "");
+      emit("info", "NEXT");
+      emit("sys", `Next: ${C("gstats")}`);
       return;
     }
     if (low === "reset") {
@@ -2459,7 +2604,9 @@ if (low === "nuke" || low === "wipe") {
     if (low === "treasures") return void listTreasures();
 
     emit("err", `Unknown command: '${v}'.`);
-    emit("info", `Next: ${C("commands")}  •  or  •  ${C("help")}`);
+    emit("info", "NEXT");
+    emit("sys", `Next: ${C("commands")}`);
+    emit("sys", `Or: ${C("help")}`);
   };
 
   // INPUT HANDLER
@@ -2488,29 +2635,58 @@ if (low === "nuke" || low === "wipe") {
 
     emit("cmd", `> ${trimmed.length === 0 ? "" : trimmed}`);
 
+    if (prompt.mode === "DOCS_SELECT") {
+      if (trimmed === "1") {
+        window.open(DOCS.genesis, "_blank", "noopener,noreferrer");
+        emit("ok", "Opened: Genesis (GitHub)");
+        setPrompt({ mode: "IDLE" });
+        return;
+      }
+      if (trimmed === "2") {
+        window.open(DOCS.whitepaper, "_blank", "noopener,noreferrer");
+        emit("ok", "Opened: Whitepaper (GitHub)");
+        setPrompt({ mode: "IDLE" });
+        return;
+      }
+      if (trimmed === "3") {
+        window.open(DOCS.monetary, "_blank", "noopener,noreferrer");
+        emit("ok", "Opened: Monetary Policy (GitHub)");
+        setPrompt({ mode: "IDLE" });
+        return;
+      }
+      if (trimmed === "4") {
+        window.open(DOCS.glossary, "_blank", "noopener,noreferrer");
+        emit("ok", "Opened: Glossary (GitHub)");
+        setPrompt({ mode: "IDLE" });
+        return;
+      }
+      emit("warn", `Reply with ${C("1")}–${C("4")}, or type ${C("cancel")}.`);
+      return;
+    }
+
     if (prompt.mode === "HELP_SELECT") {
-      if (trimmed === "1") printHelpNarrative("USER");
-      else if (trimmed === "2") printHelpNarrative("SPONSOR");
-      else if (trimmed === "3") printHelpNarrative("ADMIN");
+      if (trimmed === "1") printHelpContext("USER");
+      else if (trimmed === "2") printHelpContext("SPONSOR");
+      else if (trimmed === "3") printHelpContext("ADMIN");
       else emit("warn", `Reply with ${C("1")}, ${C("2")} or ${C("3")}.`);
       setPrompt({ mode: "IDLE" });
       return;
     }
 
     if (prompt.mode === "CONFIRM_NUKE") {
-  // hard gate: admin only, even inside confirm prompt
-  if (!terminalPass || terminalPass.username !== "admin") {
-    emit("err", "ACCESS DENIED // ADMIN CLEARANCE REQUIRED");
-    setPrompt({ mode: "IDLE" });
-    return;
-  }
+      // hard gate: admin only, even inside confirm prompt
+      if (!terminalPass || terminalPass.username !== "admin") {
+        emit("err", "ACCESS DENIED // ADMIN CLEARANCE REQUIRED");
+        setPrompt({ mode: "IDLE" });
+        return;
+      }
 
-  if (isYes(trimmed)) {
-    setPrompt({ mode: "IDLE" });
-    nukeLocalState();
-    return;
-  }
-if (isNo(trimmed)) {
+      if (isYes(trimmed)) {
+        setPrompt({ mode: "IDLE" });
+        nukeLocalState();
+        return;
+      }
+      if (isNo(trimmed)) {
         emit("sys", "NUKE cancelled.");
         setPrompt({ mode: "IDLE" });
         return;
@@ -2538,6 +2714,10 @@ if (isNo(trimmed)) {
       saveUsers(users);
       setTerminalPass(tp);
       emit("ok", `Terminal Pass claimed: ${G(u)}`);
+      emit("sys", "");
+      emit("info", "NEXT");
+      emit("sys", `Next: ${C("user")}`);
+      emit("sys", `Or: ${C("sponsor")}`);
       setPrompt({ mode: "IDLE" });
       return;
     }
@@ -2566,6 +2746,10 @@ if (isNo(trimmed)) {
       }
       setTerminalPass(tp);
       emit("ok", `Login success: ${G(u)}`);
+      emit("sys", "");
+      emit("info", "NEXT");
+      emit("sys", `Next: ${C("user")}`);
+      emit("sys", `Or: ${C("sponsor")}`);
       setPrompt({ mode: "IDLE" });
       return;
     }
@@ -2676,33 +2860,33 @@ if (isNo(trimmed)) {
 
     // econ
     if (prompt.mode === "ACQUIRE_USDDD_AMOUNT") {
-  if (!requirePass()) return;
+      if (!requirePass()) return;
 
-  const amt = Number(trimmed);
-  if (!Number.isFinite(amt) || amt <= 0) return void emit("warn", "Enter a valid amount.");
+      const amt = Number(trimmed);
+      if (!Number.isFinite(amt) || amt <= 0) return void emit("warn", "Enter a valid amount.");
 
-  const user = terminalPass!.username;
-  const currentTotal = getAcquiredTotalForUser(user);
-  const nextTotal = currentTotal + amt;
+      const user = terminalPass!.username;
+      const currentTotal = getAcquiredTotalForUser(user);
+      const nextTotal = currentTotal + amt;
 
-  if (nextTotal > ACQUIRE_CAP + 1e-9) {
-    const remaining = Math.max(0, ACQUIRE_CAP - currentTotal);
-    emit("err", `ACQUIRE BLOCKED // USDDD ACQUISITION CAP REACHED (${ACQUIRE_CAP})`);
-    emit("info", `Remaining cap: ${remaining.toFixed(2)} USDDD`);
-    emit("sys", "Cap applies to acquired USDDD only (not daily allocation).");
-    setPrompt({ mode: "IDLE" });
-    return;
-  }
+      if (nextTotal > ACQUIRE_CAP + 1e-9) {
+        const remaining = Math.max(0, ACQUIRE_CAP - currentTotal);
+        emit("err", `ACQUIRE BLOCKED // USDDD ACQUISITION CAP REACHED (${ACQUIRE_CAP})`);
+        emit("info", `Remaining cap: ${remaining.toFixed(2)} USDDD`);
+        emit("sys", "Cap applies to acquired USDDD only (not daily allocation).");
+        setPrompt({ mode: "IDLE" });
+        return;
+      }
 
-  const updatedTotal = addAcquiredForUser(user, amt);
-  setAcquiredTotal(updatedTotal);
-  setUsdddAcquired((p) => p + amt);
+      const updatedTotal = addAcquiredForUser(user, amt);
+      setAcquiredTotal(updatedTotal);
+      setUsdddAcquired((p) => p + amt);
 
-  emit("ok", `Acquired confirmed: +${amt.toFixed(2)} USDDD (Acquired).`);
-  emit("sys", `Acquired total (this device): ${updatedTotal.toFixed(2)} / ${ACQUIRE_CAP}`);
-  setPrompt({ mode: "IDLE" });
-  return;
-}
+      emit("ok", `Acquired confirmed: +${amt.toFixed(2)} USDDD (Acquired).`);
+      emit("sys", `Acquired total (this device): ${updatedTotal.toFixed(2)} / ${ACQUIRE_CAP}`);
+      setPrompt({ mode: "IDLE" });
+      return;
+    }
 
     // dig prompts
     if (prompt.mode === "DIG_CHOICE") {
@@ -3017,7 +3201,7 @@ if (isNo(trimmed)) {
       return;
     }
 
-    
+
     if (prompt.mode === "SP_META_PICK") {
       const box = currentSponsorBox();
       if (!box) {
@@ -3094,7 +3278,7 @@ if (isNo(trimmed)) {
       return;
     }
 
-if (prompt.mode === "SP_BOX_PICK_FOR_USE") {
+    if (prompt.mode === "SP_BOX_PICK_FOR_USE") {
       const ids = prompt.spPickList ?? [];
       const n = Number(trimmed);
       if (!Number.isFinite(n) || n < 1 || n > ids.length) return void emit("warn", "Invalid selection.");
