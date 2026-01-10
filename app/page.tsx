@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 
 /**
  * DIGDUG.DO Terminal
- * v0.1.13.0 — Phase Zero
+ * v0.1.13.X — Phase Zero
  *
  * Implemented:
  * - Canonical chains (Top 5): ETH / BNB / SOL / ARB / BASE (no free-typed chains)
@@ -641,6 +641,44 @@ function walletRegistryKey(chainId: ChainId, address: string) {
   const fam = chainFamily(chainId);
   if (fam === "EVM") return `evm:${normalizeEvmAddr(address)}`;
   return `sol:${address.trim()}`;
+}
+
+// NOTE (Phase Zero – ECONOMICS LOCK):
+// USD value is COST-ANCHORED via sampleUsdTarget().
+// Token "price" is DERIVED per-dig for display consistency only.
+// Derived price is NOT authoritative and MUST NOT be reused as oracle data.
+// Future phases may replace this with sponsor-controlled or on-chain pricing.
+
+// ---------- Phase Zero: USD value curve (skew low-end), scaled by costUSDDD ----------
+const VALUE_BUCKETS = {
+  under: { p: 0.25, min: 0.10, max: 0.99 },  // * cost
+  normal: { p: 0.65, min: 1.00, max: 10.00 }, // * cost
+  rare: { p: 0.10, min: 11.00, max: 50.00 }   // * cost
+};
+
+// skew toward low end (your choice #2)
+function skewLow01() {
+  const r = Math.random();
+  return r * r; // squaring biases low
+}
+
+function sampleUsdTarget(costUSDDD: number) {
+  const c = Math.max(0.000001, costUSDDD);
+  const x = Math.random();
+
+  const u = VALUE_BUCKETS.under;
+  const n = VALUE_BUCKETS.normal;
+
+  const bucket =
+    x < u.p ? u :
+      x < u.p + n.p ? n :
+        VALUE_BUCKETS.rare;
+
+  const t = skewLow01();
+  const usd = (bucket.min + (bucket.max - bucket.min) * t) * c;
+
+  // hard caps (by-cost is inherent, but keep absolute numeric safety)
+  return Math.max(0, usd);
 }
 
 export default function Page() {
@@ -1736,8 +1774,15 @@ export default function Page() {
     const sym = campaign.tokenSymbol ?? "TOKEN";
     const tier = findTier(campaign, rewardAmt);
 
-    const usdPrice = mockTokenUsdPrice(campaign, priceMockModeRef.current);
-    const usdValue = usdPrice == null ? null : rewardAmt * usdPrice;
+    // cost-anchored USD value (mock economics)
+    const usdValue = sampleUsdTarget(campaign.costUSDDD);
+
+    // derived snapshot price for this dig
+    const usdPrice =
+      rewardAmt > 0
+        ? clamp(usdValue / rewardAmt, 0.000001, 1000)
+        : null;
+
 
     // reserve on box ledger (claimed until withdrawn)
     setCampaigns((prev) => prev.map((c) => (c.id === campaign.id ? { ...c, claimedUnwithdrawn: c.claimedUnwithdrawn + rewardAmt } : c)));
@@ -1788,6 +1833,8 @@ export default function Page() {
       usddd_cost: campaign.costUSDDD,
       reward_amount: rewardAmt,
       priced: usdPrice != null,
+      reward_price_usd: usdPrice,
+      reward_value_usd: usdValue,
     });
 
     if (usdValue != null) emit("ok", `${tier} — +${rewardAmt.toFixed(6)} ${sym} (~$${fmtUsdValue(usdValue)})`);
