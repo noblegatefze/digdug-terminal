@@ -73,6 +73,24 @@ body {
   overflow: hidden;
 }
 
+/* Add a separate fade layer ABOVE scanlines/noise but BELOW UI */
+.dd-screen .dd-topfade {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: calc(var(--dd-pad-top) + 34px);
+  pointer-events: none;
+  z-index: 3;
+
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.92) 0%,
+    rgba(0, 0, 0, 0.65) 45%,
+    rgba(0, 0, 0, 0.0) 100%
+  );
+}
+
 /* ===============================
    Screen dim when instruction drawer is open
    =============================== */
@@ -178,6 +196,9 @@ body {
 }
 
 .dd-terminal {
+  position: relative;
+  isolation: isolate;
+  z-index: 2;
   height: 100vh;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
@@ -703,6 +724,29 @@ body {
   text-transform: uppercase;
   user-select: none;
   pointer-events: none;
+}
+
+/* ====== Global top fade (edge-to-edge, stays at viewport top) ====== */
+.dd-topfade {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+
+  /* covers your top padding + a bit of text */
+  height: calc(var(--dd-pad-top) + 34px);
+
+  pointer-events: none;
+
+  /* above terminal text, below drawers/backdrops if needed */
+  z-index: 55;
+
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.92) 0%,
+    rgba(0, 0, 0, 0.65) 45%,
+    rgba(0, 0, 0, 0.0) 100%
+  );
 }
 
 /* Cursor */
