@@ -270,7 +270,7 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.1.13.5";
+const BUILD_VERSION = "Zero Phase v0.1.13.6";
 
 // local storage keys
 const STORAGE_KEY_PASS = "dd_terminal_pass_v1";
@@ -322,8 +322,24 @@ const DOCS = {
 };
 
 function nowTs() {
-  return new Date().toISOString().slice(11, 19);
+  const d = new Date();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  return `${hh}:${mm}:${ss}`;
 }
+
+function nowLocalDateTime() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+}
+
 function uid(prefix = "id") {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
 }
@@ -1800,7 +1816,7 @@ export default function Page() {
         amount: rewardAmt,
         status: "CLAIMED",
         createdAt: Date.now(),
-        createdAtStr: new Date().toISOString().slice(0, 19).replace("T", " "),
+        createdAtStr: nowLocalDateTime(),
       };
       setClaims((prev) => {
         const next = [...prev, newClaim];
@@ -1814,7 +1830,7 @@ export default function Page() {
 
     const record: DigRecord = {
       id: uid("dig"),
-      at: new Date().toISOString().slice(0, 19).replace("T", " "),
+      at: nowLocalDateTime(),
       campaignId: campaign.id,
       label: `${sym}/${campaign.deployChainId}`,
       spentUSDDD: campaign.costUSDDD,
@@ -2388,33 +2404,6 @@ export default function Page() {
     if (low === "docs") return void doDocs();
     if (low === "build") return void emit("sys", `BUILD: ${BUILD_VERSION}`);
     if (low === "gstats") return void fetchAndPrintGlobalPulse();
-
-    // mock price mode (admin/operator)
-    if (low.startsWith("price mock")) {
-      if (!requireAdminUser()) return;
-      const parts = low.split(/\s+/).filter(Boolean);
-
-      // forms:
-      //  - price mock
-      //  - price mock random|always|never
-      //  - price mock mode random|always|never
-      const pick = (parts[2] === "mode" ? parts[3] : parts[2])?.toUpperCase();
-
-      if (!pick) {
-        emit("info", `Price mock mode: ${G(priceMockModeRef.current)}`);
-        emit("sys", `Set: ${C("price mock random")} • ${C("price mock always")} • ${C("price mock never")}`);
-        return;
-      }
-
-      if (pick !== "RANDOM" && pick !== "ALWAYS" && pick !== "NEVER") {
-        emit("warn", "Invalid mode. Use: RANDOM / ALWAYS / NEVER");
-        return;
-      }
-
-      setPriceMockMode(pick as PriceMockMode);
-      emit("ok", `Price mock mode set: ${G(pick)}`);
-      return;
-    }
 
     // mock price mode (admin/operator)
     if (low.startsWith("price mock")) {
@@ -3426,6 +3415,7 @@ export default function Page() {
 
   return (
     <main className={`dd-screen ${panelOpen ? "dd-dimall" : ""}`}>
+      <div className="dd-topfade" aria-hidden="true" />
       <div className="dd-version-fixed">DIGDUG.DO {BUILD_VERSION}</div>
 
       {panelOpen && <div className="dd-backdrop" onClick={() => setPanelOpen(false)} aria-hidden="true" />}
