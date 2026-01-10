@@ -270,7 +270,7 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.1.13.3";
+const BUILD_VERSION = "Zero Phase v0.1.13.5";
 
 // local storage keys
 const STORAGE_KEY_PASS = "dd_terminal_pass_v1";
@@ -810,14 +810,14 @@ export default function Page() {
       }
 
       const rt = data.rewards_claimed_tokens_total;
-      const ru = data.rewards_priced_usd_total;
+      const ru = data.rewards_with_price_usd;
       const pricedCount = data.price_priced;
       const naCount = data.price_na;
 
       if (rt != null || ru != null || pricedCount != null || naCount != null) {
         emit("info", "REWARDS");
         if (rt != null) emit("sys", `Total rewards claimed (tokens): ${Number(rt).toFixed(2)}`);
-        if (ru != null) emit("sys", `Rewards with price: $${Number(ru).toFixed(2)}`);
+        if (ru != null) emit("sys", `Rewards with price (mock): $${Number(ru).toFixed(2)}`);
         if (naCount != null) emit("sys", `Rewards N/A: ${naCount} finds`);
         emit("sys", "");
       }
@@ -1501,33 +1501,33 @@ export default function Page() {
   };
 
   const printCommands = (m: ConsoleMode) => {
-  if (m === "USER") {
-    emit("info", "USER COMMANDS");
-    emit("sys", "");
-    emit("sys", `${C("dig")}        ${C("rewards")}`);
-    emit("sys", `${C("claim")}      ${C("acquire")}`);
-    emit("sys", `${C("withdraw")}   ${C("wallet")}`);
-    emit("sys", `${C("help")}       ${C("commands")}`);
-    emit("sys", `${C("docs")}       ${C("gstats")}`);
-    return;
-  }
+    if (m === "USER") {
+      emit("info", "USER COMMANDS");
+      emit("sys", "");
+      emit("sys", `${C("dig")}        ${C("rewards")}`);
+      emit("sys", `${C("claim")}      ${C("acquire")}`);
+      emit("sys", `${C("withdraw")}   ${C("wallet")}`);
+      emit("sys", `${C("help")}       ${C("commands")}`);
+      emit("sys", `${C("docs")}       ${C("gstats")}`);
+      return;
+    }
 
-  if (m === "SPONSOR") {
-    emit("info", "SPONSOR COMMANDS");
-    emit("sys", "");
-    emit("sys", `${C("create box")}   ${C("boxes")}`);
-    emit("sys", `${C("activate")}     ${C("configure")}`);
-    emit("sys", `${C("fund box")}     ${C("wallet")}`);
-    emit("sys", `${C("help")}         ${C("commands")}`);
-    emit("sys", `${C("docs")}         ${C("gstats")}`);
-    return;
-  }
+    if (m === "SPONSOR") {
+      emit("info", "SPONSOR COMMANDS");
+      emit("sys", "");
+      emit("sys", `${C("create box")}   ${C("boxes")}`);
+      emit("sys", `${C("activate")}     ${C("configure")}`);
+      emit("sys", `${C("fund box")}     ${C("wallet")}`);
+      emit("sys", `${C("help")}         ${C("commands")}`);
+      emit("sys", `${C("docs")}         ${C("gstats")}`);
+      return;
+    }
 
-  emit("info", "ADMIN COMMANDS");
-  emit("sys", "");
-  emit("sys", `${C("gstats")}   ${C("stats")}`);
-  emit("sys", `${C("nuke")}     ${C("reset")}`);
-};
+    emit("info", "ADMIN COMMANDS");
+    emit("sys", "");
+    emit("sys", `${C("gstats")}   ${C("stats")}`);
+    emit("sys", `${C("nuke")}     ${C("reset")}`);
+  };
 
   const printConsoleStatus = (m: ConsoleMode) => {
     if (m === "USER") {
