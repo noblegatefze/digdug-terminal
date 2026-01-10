@@ -15,6 +15,19 @@ function env(name: string) {
   return v;
 }
 
+const MOCK_USD_PRICE: Record<string, number> = {
+  SAND: 0.50,
+  THOR: 2.25,
+  ENRG: 0.12,
+  MEME: 0.01,
+  CAKE: 3.10,
+};
+
+function toNum(v: any): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 export async function POST(req: Request) {
   try {
     const url = env("SUPABASE_URL");
@@ -35,15 +48,29 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "invalid event" }, { status: 400 });
     }
 
+    const rewardAmount = toNum((body as any).reward_amount);
+    const priced = Boolean((body as any).priced);
+    const tokenSymbol = (body as any).token_symbol ?? null;
+
+    const priceUsd =
+      priced && tokenSymbol && typeof tokenSymbol === "string"
+        ? (MOCK_USD_PRICE[tokenSymbol.toUpperCase()] ?? null)
+        : null;
+
+    const valueUsd =
+      priceUsd !== null && rewardAmount !== null ? rewardAmount * priceUsd : null;
+
     const payload = {
       install_id,
       event,
       box_id: (body as any).box_id ?? null,
       chain: (body as any).chain ?? null,
-      token_symbol: (body as any).token_symbol ?? null,
+      token_symbol: tokenSymbol,
       usddd_cost: (body as any).usddd_cost ?? null,
-      reward_amount: (body as any).reward_amount ?? null,
-      priced: (body as any).priced ?? null,
+      reward_amount: rewardAmount,
+      priced,
+      reward_price_usd: priceUsd,
+      reward_value_usd: valueUsd,
     };
 
     const r = await fetch(`${url}/rest/v1/stats_events`, {
