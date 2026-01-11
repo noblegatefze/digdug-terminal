@@ -23,6 +23,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const update = await req.json();
+  console.log("TG UPDATE chat:", update?.message?.chat);
 
   // 1️⃣ Private chat: /start
   if (update.message?.text === "/start") {
