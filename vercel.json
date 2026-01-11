@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/tg-enforce",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/gstats-broadcast",
+      "schedule": "0 */12 * * *"
     }
   ]
 }
