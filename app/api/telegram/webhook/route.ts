@@ -89,6 +89,15 @@ function getChatId(update: any): number | null {
     return typeof chat?.id === "number" ? chat.id : null;
 }
 
+function generateVerifyCode() {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    let out = "DG-";
+    for (let i = 0; i < 4; i++) {
+        out += chars[Math.floor(Math.random() * chars.length)];
+    }
+    return out;
+}
+
 export async function GET() {
     return new Response("Telegram webhook OK", { status: 200 });
 }
@@ -128,6 +137,51 @@ export async function POST(req: NextRequest) {
     if (DEBUG && text.startsWith("/")) {
         await sendMessage(chatId, `DEBUG ✅ got: <code>${text}</code>\nchat_id=<code>${chatId}</code>`);
     }
+
+    // ✅ /verify (DM only)
+    if ((text === "/verify" || text.startsWith("/verify ")) && chat?.type === "private") {
+        const tgUserId = update?.message?.from?.id;
+
+        if (!tgUserId) {
+            await sendMessage(chatId, "❌ Unable to identify your Telegram user.");
+            return NextResponse.json({ ok: true });
+        }
+
+        const code = generateVerifyCode();
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 minutes
+
+        const { error } = await supabaseAdmin
+            .from("dd_tg_verify_codes")
+            .insert({
+                tg_user_id: tgUserId,
+                code,
+                expires_at: expiresAt,
+            });
+
+        if (error) {
+            console.error("[verify] insert failed:", error);
+            await sendMessage(chatId, "❌ Failed to generate verification code. Try again.");
+            return NextResponse.json({ ok: true });
+        }
+
+        await sendMessage(
+            chatId,
+            `🔐 <b>Terminal Pass Verification</b>
+
+Your verification code:
+<b>${code}</b>
+
+⏳ Expires in 10 minutes.
+
+Go to https://digdug.do
+Open the Terminal and type:
+
+<code>/verify ${code}</code>`
+        );
+
+        return NextResponse.json({ ok: true });
+    }
+
 
     // ✅ /start (DM onboarding)
     if (text === "/start" || text.startsWith("/start ")) {
