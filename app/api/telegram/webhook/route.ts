@@ -3,7 +3,6 @@ import { NextRequest, NextResponse } from "next/server";
 const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN!;
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 
-// Basic helper to send messages
 async function sendMessage(chatId: number, text: string) {
   await fetch(`${TELEGRAM_API}/sendMessage`, {
     method: "POST",
@@ -17,59 +16,97 @@ async function sendMessage(chatId: number, text: string) {
   });
 }
 
+function getMsg(update: any) {
+  return update?.message ?? update?.edited_message ?? null;
+}
+
+function getText(update: any): string {
+  const msg = getMsg(update);
+  return String(msg?.text ?? "").trim();
+}
+
+function getChat(update: any) {
+  const msg = getMsg(update);
+  return msg?.chat ?? null;
+}
+
+function getChatId(update: any): number | null {
+  const chat = getChat(update);
+  return typeof chat?.id === "number" ? chat.id : null;
+}
+
 export async function GET() {
   return new Response("Telegram webhook OK", { status: 200 });
 }
 
 export async function POST(req: NextRequest) {
   const update = await req.json();
-  console.log("TG UPDATE chat:", update?.message?.chat);
+  const text = getText(update);
+  const chat = getChat(update);
+  const chatId = getChatId(update);
 
-  // 1️⃣ Private chat: /start
-  if (update.message?.text === "/start") {
-    const chatId = update.message.chat.id;
+  if (!chatId) return NextResponse.json({ ok: true });
 
+  // ✅ /start (DM onboarding)
+  if (text === "/start" || text.startsWith("/start ")) {
     await sendMessage(
       chatId,
-      `⛏ <b>Welcome to DIGSTER</b>
+      `👋 <b>Welcome to DIGSTER</b>
 
 This bot is the official companion for <b>DIGDUG.DO</b>.
 
-🔐 To participate in the testnet:
-1. Visit https://digdug.do
-2. Get your Terminal Pass
-3. Join the DIGDUG Telegram group
+🔐 Phase Zero:
+1) Go to https://digdug.do
+2) Claim a Terminal Pass
+3) Use this bot for announcements + verification
 
-⚠️ Phase Zero:
-- Manual rewards
-- Test protocol
-- Limited Golden Finds daily
-
-Good luck, Digger.`
+Type <b>/help</b> to see commands.`
     );
-
     return NextResponse.json({ ok: true });
   }
 
-  // 2️⃣ User joined group
-  if (update.message?.new_chat_members) {
-    const chatId = update.message.chat.id;
+  // ✅ /help
+  if (text === "/help") {
+    await sendMessage(
+      chatId,
+      `Commands:
+• /ping — bot health check
+• /chatid — show this chat id (admin use)
+• /help — commands`
+    );
+    return NextResponse.json({ ok: true });
+  }
 
+  // ✅ /ping (works in groups even with privacy mode)
+  if (text === "/ping" || text.startsWith("/ping@")) {
+    const type = chat?.type ?? "unknown";
+    const title = chat?.title ? ` • ${chat.title}` : "";
+    await sendMessage(chatId, `✅ Digster online${title}\nchat_type=${type}`);
+    return NextResponse.json({ ok: true });
+  }
+
+  // ✅ /chatid (so we can capture the supergroup chat id)
+  if (text === "/chatid" || text.startsWith("/chatid@")) {
+    const type = chat?.type ?? "unknown";
+    const title = chat?.title ? `\ntitle=${chat.title}` : "";
+    await sendMessage(chatId, `chat_id=${chatId}\nchat_type=${type}${title}`);
+    return NextResponse.json({ ok: true });
+  }
+
+  // ✅ User joined group
+  if (getMsg(update)?.new_chat_members) {
     await sendMessage(
       chatId,
       `👋 Welcome.
 
-This is a <b>closed test group</b>.
+This is a <b>closed test group</b> for Phase Zero.
 
-🔑 Access requires a <b>Terminal Pass</b>.
-Visit: https://digdug.do
+🔑 Access requires a <b>Terminal Pass</b> from https://digdug.do
 
-You have a limited time to verify before removal.`
+Type <b>/help</b> for commands.`
     );
-
     return NextResponse.json({ ok: true });
   }
 
-  // 3️⃣ Ignore everything else for now
   return NextResponse.json({ ok: true });
 }
