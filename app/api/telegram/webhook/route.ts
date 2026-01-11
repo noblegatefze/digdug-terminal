@@ -54,10 +54,10 @@ export async function POST(req: NextRequest) {
 
     if (!chatId) return NextResponse.json({ ok: true });
 
-    // DEBUG: reply to ANY slash command so we know updates arrive
-    if (text.startsWith("/")) {
+    const DEBUG = false;
+
+    if (DEBUG && text.startsWith("/")) {
         await sendMessage(chatId, `DEBUG ✅ got: <code>${text}</code>\nchat_id=<code>${chatId}</code>`);
-        // do NOT return; let normal handlers run too (optional)
     }
 
     // ✅ /start (DM onboarding)
