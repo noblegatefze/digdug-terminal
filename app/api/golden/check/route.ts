@@ -60,9 +60,11 @@ export async function POST(req: Request) {
     const day = todayUTC();
 
     // 1) Atomically take a daily slot (prevents race conditions)
+    type GoldenSlot = { allowed: boolean; new_count: number };
+
     const { data: slot, error: slotErr } = await supabaseAdmin
         .rpc("dd_take_golden_slot", { p_day: day, p_cap: DAILY_CAP })
-        .single();
+        .single<GoldenSlot>();
 
     if (slotErr) {
         console.error("[golden] slot rpc failed:", slotErr);
