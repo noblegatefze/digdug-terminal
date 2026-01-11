@@ -2497,6 +2497,57 @@ export default function Page() {
       else emit("ok", `Terminal Pass: ${G(terminalPass.username)}`);
       return;
     }
+    // ✅ telegram verify (links TG user to this Terminal Pass)
+    if (low === "verify" || low.startsWith("verify ")) {
+      if (!requirePass()) return;
+
+      const parts = v.split(/\s+/).filter(Boolean);
+      const code = (parts[1] ?? "").trim();
+
+      if (!code) {
+        emit("warn", "Missing verification code.");
+        emit("info", "Usage:");
+        emit("sys", `Type: ${C("verify DG-XXXX")}`);
+        emit("sys", "Get a code by DM-ing the bot: /verify");
+        return;
+      }
+
+      emit("sys", "Verifying Telegram code…");
+
+      void (async () => {
+        try {
+          const r = await fetch("/api/telegram/verify", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              username: terminalPass!.username,
+              code,
+            }),
+          });
+
+          const data = (await r.json()) as any;
+
+          if (!r.ok || !data?.ok) {
+            const err = data?.error ?? `verify_failed_http_${r.status}`;
+            if (err === "code_expired") emit("err", "Verification code expired. DM the bot /verify again.");
+            else if (err === "code_already_used") emit("err", "Verification code already used. DM the bot /verify again.");
+            else if (err === "code_not_found") emit("err", "Verification code not found. Check the code and try again.");
+            else if (err === "terminal_user_not_found") emit("err", "Terminal user not found on server. Please re-login and try again.");
+            else emit("err", `Verification failed: ${err}`);
+            return;
+          }
+
+          emit("ok", `Telegram verification linked ✅ (${G(data.code)})`);
+          emit("sys", `tg_user_id=${data.tg_user_id}`);
+          return;
+        } catch (e: any) {
+          emit("err", `Verification failed (network/server): ${e?.message ?? "Unknown error"}`);
+        }
+      })();
+
+      return;
+    }
+
     if (low === "logout") {
       setTerminalPass(null);
       emit("ok", "Logged out.");
