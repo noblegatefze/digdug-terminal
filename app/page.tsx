@@ -1200,6 +1200,8 @@ export default function Page() {
     const updated: TreasureClaim[] = [];
     const eligibleIds = new Set(eligible.map((e) => e.id));
 
+    const withdrawnClaimIds: string[] = [];
+
     for (const cl of current) {
       if (!eligibleIds.has(cl.id)) updated.push(cl);
     }
@@ -1215,11 +1217,17 @@ export default function Page() {
       byCampaign[cl.campaignId] = (byCampaign[cl.campaignId] ?? 0) + take;
 
       if (take >= cl.amount - 1e-18) {
+        withdrawnClaimIds.push(cl.id);
         updated.push({ ...cl, status: "WITHDRAWN", withdrawnAt: now });
-      } else {
+      }
+      else {
         const remainder = cl.amount - take;
         updated.push({ ...cl, amount: remainder, status: "CLAIMED" });
-        updated.push({ ...cl, id: uid("clmW"), amount: take, status: "WITHDRAWN", withdrawnAt: now });
+        const wid = uid("clmW");
+        withdrawnClaimIds.push(wid);
+
+        updated.push({ ...cl, id: wid, amount: take, status: "WITHDRAWN", withdrawnAt: now });
+
       }
     }
 
@@ -1238,6 +1246,19 @@ export default function Page() {
 
     setClaims(updated);
     setTreasureBalances(recomputeTreasureBalancesForUser(username, updated));
+
+    // persist withdrawals to DB (fire-and-forget)
+    try {
+      withdrawnClaimIds.forEach((claim_id) => {
+        fetch("/api/claims/withdraw", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ claim_id }),
+        }).catch(() => { });
+      });
+    } catch {
+      // ignore
+    }
 
     sendStat("withdraw", { chain: chainId, token_symbol: symbol, reward_amount: amount, box_id: null, priced: null });
     return { ok: true as const, tx, byCampaign };
@@ -1818,6 +1839,23 @@ export default function Page() {
         createdAt: Date.now(),
         createdAtStr: nowLocalDateTime(),
       };
+      // persist claim to DB (fire-and-forget)
+      try {
+        fetch("/api/claims/add", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            username: authedUser,
+            box_id: campaign.id,
+            chain_id: campaign.deployChainId,
+            token_address: campaign.tokenAddress ?? "UNBOUND",
+            token_symbol: sym,
+            amount: rewardAmt,
+          }),
+        }).catch(() => { });
+      } catch {
+        // ignore
+      }
       setClaims((prev) => {
         const next = [...prev, newClaim];
         setTreasureBalances(recomputeTreasureBalancesForUser(authedUser, next));
@@ -2735,8 +2773,55 @@ export default function Page() {
     if (prompt.mode === "REG_USER") {
       const u = trimmed.replace(/\s+/g, "");
       if (u.length < 3) return void emit("warn", "Username too short.");
-      emit("info", "Set password:");
-      setPrompt({ mode: "REG_PASS", authUser: u });
+
+      // DB-backed registration (Phase Zero)
+      emit("sys", "Creating Terminal Pass...");
+      setPrompt({ mode: "IDLE" });
+
+      void (async () => {
+        try {
+          const r = await fetch("/api/auth/register", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ username: u }),
+          });
+
+          const data = (await r.json()) as any;
+
+          if (!r.ok) {
+            emit("err", data?.error ?? `Register failed (HTTP ${r.status})`);
+            emit("info", "NEXT");
+            emit("sys", `Next: ${C("register")}`);
+            return;
+          }
+
+          const pass = String(data.terminal_pass ?? "");
+          if (!pass) {
+            emit("err", "Register failed: missing terminal_pass.");
+            return;
+          }
+
+          // Store a local session (Phase Zero)
+          const tp: TerminalPass = {
+            username: u,
+            passHash: passHashOf(pass), // local-only marker
+            createdAt: Date.now(),
+            twoFaEnabled: false,
+          };
+
+          setTerminalPass(tp);
+
+          emit("ok", `Terminal Pass claimed: ${G(u)}`);
+          emit("warn", `SAVE THIS PASS (you will need it to login): ${G(pass)}`);
+          emit("sys", "");
+          emit("info", "NEXT");
+          emit("sys", `Next: ${C("user")}`);
+          emit("sys", `Or: ${C("sponsor")}`);
+        } catch (e: any) {
+          emit("err", `Register failed: ${e?.message ?? "Unknown error"}`);
+        }
+      })();
+
       return;
     }
 
@@ -2761,32 +2846,66 @@ export default function Page() {
     if (prompt.mode === "LOGIN_USER") {
       const u = trimmed.replace(/\s+/g, "");
       if (u.length < 3) return void emit("warn", "Enter a valid username.");
-      emit("info", "Enter password:");
+      emit("info", "Enter Terminal Pass:");
       setPrompt({ mode: "LOGIN_PASS", authUser: u });
       return;
     }
 
     if (prompt.mode === "LOGIN_PASS") {
       const u = prompt.authUser!;
-      const users = loadUsers();
-      const tp = users[u];
-      if (!tp) {
-        emit("err", "User not found on this device. Use: register");
-        setPrompt({ mode: "IDLE" });
-        return;
-      }
-      if (tp.passHash !== passHashOf(trimmed)) {
-        emit("err", "Login failed.");
-        setPrompt({ mode: "IDLE" });
-        return;
-      }
-      setTerminalPass(tp);
-      emit("ok", `Login success: ${G(u)}`);
-      emit("sys", "");
-      emit("info", "NEXT");
-      emit("sys", `Next: ${C("user")}`);
-      emit("sys", `Or: ${C("sponsor")}`);
+      const pass = trimmed;
+
+      emit("sys", "Authenticating…");
       setPrompt({ mode: "IDLE" });
+
+      void (async () => {
+        try {
+          const r = await fetch("/api/auth/login", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              username: u,
+              terminal_pass: pass,
+            }),
+          });
+
+          const data = await r.json();
+
+          if (!r.ok || !data.ok) {
+            emit("err", data.error ?? "Login failed.");
+            emit("info", "NEXT");
+            emit("sys", `Next: ${C("login")}`);
+            return;
+          }
+
+          // hydrate terminal pass from DB result
+          const tp: TerminalPass = {
+            username: data.user.username,
+            passHash: passHashOf(pass), // local cache only
+            createdAt: Date.now(),
+            twoFaEnabled: data.user.twofa_enabled ?? false,
+            twoFaSeed: data.user.twofa_seed ?? undefined,
+          };
+
+          // persist locally (Phase Zero hybrid)
+          const users = loadUsers();
+          users[tp.username] = tp;
+          saveUsers(users);
+
+          setTerminalPass(tp);
+
+          emit("ok", `Login success: ${G(tp.username)}`);
+          emit("sys", "");
+          emit("info", "NEXT");
+          emit("sys", `Next: ${C("user")}`);
+          emit("sys", `Or: ${C("sponsor")}`);
+        } catch (e) {
+          emit("err", "Login error (network or server).");
+          emit("info", "NEXT");
+          emit("sys", `Next: ${C("login")}`);
+        }
+      })();
+
       return;
     }
 
@@ -3000,6 +3119,7 @@ export default function Page() {
       const g = groups[n - 1];
       emit("info", `Selected: ${g.symbol} • ${chainLabel(g.chainId)} • ${g.amount.toFixed(6)}`);
       emit("sys", `token=${shortAddr(g.tokenAddress)} • claims=${g.claimsCount} • boxes=${g.boxesCount}`);
+      emit("sys", `Max: ${max.toFixed(6)}`);
       emit("info", "Enter amount to withdraw:");
       setPrompt({ mode: "WITHDRAW_TREASURE_AMOUNT", withdrawKind: "TREASURE", selectedAsset: g.key });
       return;
@@ -3011,7 +3131,8 @@ export default function Page() {
       if (!Number.isFinite(amt) || amt <= 0) return void emit("warn", "Enter a valid amount.");
 
       const max = getTreasureGroupAmount(authedUser, key);
-      if (amt > max) return void emit("err", "Amount exceeds available.");
+      const EPS = 1e-6; // 0.000001 tokens tolerance
+      if (amt - max > EPS) return void emit("err", "Amount exceeds available.");
 
       emit("info", "Enter destination address (press ENTER to use connected wallet):");
       setPrompt({ mode: "WITHDRAW_TREASURE_ADDR", withdrawKind: "TREASURE", selectedAsset: key, amount: amt });
