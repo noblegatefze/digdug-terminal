@@ -182,7 +182,6 @@ Open the Terminal and type:
         return NextResponse.json({ ok: true });
     }
 
-
     // ✅ /start (DM onboarding)
     if (text === "/start" || text.startsWith("/start ")) {
         await sendMessage(
@@ -229,20 +228,60 @@ Type <b>/help</b> to see commands.`
         return NextResponse.json({ ok: true });
     }
 
-    // ✅ User joined group
-    if (getMsg(update)?.new_chat_members) {
-        await sendMessage(
-            chatId,
-            `👋 Welcome.
+    // ✅ User joined group (NEW-ONLY SOFT GATE)
+    const msg = getMsg(update);
+    const newMembers = msg?.new_chat_members;
 
-This is a <b>closed test group</b> for Phase Zero.
+    if (newMembers && Array.isArray(newMembers) && newMembers.length > 0) {
+        // only enforce in groups/supergroups
+        if (chat?.type === "group" || chat?.type === "supergroup") {
+            const graceMinutes = 10;
+            const graceExpiresAt = new Date(Date.now() + graceMinutes * 60 * 1000).toISOString();
 
-🔑 Access requires a <b>Terminal Pass</b> from https://digdug.do
+            for (const m of newMembers) {
+                const tgUserId = m?.id;
+                const isBot = !!m?.is_bot;
 
-Type <b>/help</b> for commands.`
-        );
+                // Never gate bots (including ourselves)
+                if (!tgUserId || isBot) continue;
+
+                // Insert / upsert pending join record
+                const { error } = await supabaseAdmin
+                    .from("dd_tg_pending_joins")
+                    .upsert(
+                        {
+                            group_chat_id: String(chatId),
+                            tg_user_id: tgUserId,
+                            grace_expires_at: graceExpiresAt,
+                            warned_at: new Date().toISOString(),
+                            status: "PENDING",
+                        },
+                        { onConflict: "group_chat_id,tg_user_id" }
+                    );
+
+                if (error) {
+                    console.error("[tg] pending join upsert error:", error);
+                }
+
+                // Warn message (soft gate)
+                const first = m?.first_name ? ` ${m.first_name}` : "";
+                await sendMessage(
+                    chatId,
+                    `👋 Welcome${first}.
+
+🔐 <b>Verification required</b> (Phase Zero testers only)
+
+You have <b>${graceMinutes} minutes</b> to verify your Terminal Pass or you will be removed.
+
+✅ Step 1: DM @DigsterBot and type <b>/verify</b>
+✅ Step 2: Go to https://digdug.do and type the code in Terminal:
+<code>verify DG-XXXX</code>`
+                );
+            }
+
+            return NextResponse.json({ ok: true });
+        }
+
         return NextResponse.json({ ok: true });
     }
 
-    return NextResponse.json({ ok: true });
-}
