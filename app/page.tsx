@@ -3119,7 +3119,6 @@ export default function Page() {
       const g = groups[n - 1];
       emit("info", `Selected: ${g.symbol} • ${chainLabel(g.chainId)} • ${g.amount.toFixed(6)}`);
       emit("sys", `token=${shortAddr(g.tokenAddress)} • claims=${g.claimsCount} • boxes=${g.boxesCount}`);
-      emit("sys", `Max: ${max.toFixed(6)}`);
       emit("info", "Enter amount to withdraw:");
       setPrompt({ mode: "WITHDRAW_TREASURE_AMOUNT", withdrawKind: "TREASURE", selectedAsset: g.key });
       return;
