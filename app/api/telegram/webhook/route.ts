@@ -16,6 +16,60 @@ async function sendMessage(chatId: number, text: string) {
     });
 }
 
+import { createClient } from "@supabase/supabase-js";
+
+function reqEnv(name: string) {
+    const v = process.env[name];
+    if (!v) throw new Error(`Missing env: ${name}`);
+    return v;
+}
+
+// Service-role Supabase client (server-only)
+const supabaseAdmin = createClient(
+    reqEnv("SUPABASE_URL"),
+    reqEnv("SUPABASE_SERVICE_ROLE_KEY"),
+    {
+        auth: { persistSession: false },
+    }
+);
+
+type TgChat = {
+    id: number;
+    type: "private" | "group" | "supergroup" | "channel";
+    title?: string;
+    username?: string;
+    first_name?: string;
+    last_name?: string;
+};
+
+function chatDisplayTitle(chat: TgChat): string | null {
+    if (chat.title) return chat.title;
+    const name = [chat.first_name, chat.last_name].filter(Boolean).join(" ").trim();
+    return name || null;
+}
+
+async function upsertTgChat(chat: TgChat) {
+    // Telegram chat IDs can be large; send as string so Postgres bigint can cast safely
+    const chat_id = String(chat.id);
+
+    const payload = {
+        chat_id, // bigint in DB; string here is OK (Postgres casts)
+        chat_type: chat.type ?? null,
+        title: chatDisplayTitle(chat),
+        username: chat.username ?? null,
+        last_seen_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabaseAdmin
+        .from("dd_tg_chats")
+        .upsert(payload, { onConflict: "chat_id" });
+
+    if (error) {
+        // Don't break the bot on persistence failures — just log
+        console.error("[tg] dd_tg_chats upsert error:", error);
+    }
+}
+
 function getMsg(update: any) {
     return update?.message ?? update?.edited_message ?? null;
 }
@@ -41,6 +95,21 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
     const update = await req.json();
+
+    // --- STEP 2B: persist chat metadata on ANY update ---
+    const chatAny: TgChat | undefined =
+        update?.message?.chat ??
+        update?.edited_message?.chat ??
+        update?.channel_post?.chat ??
+        update?.edited_channel_post?.chat ??
+        update?.my_chat_member?.chat ??
+        update?.chat_member?.chat ??
+        update?.callback_query?.message?.chat;
+
+    if (chatAny?.id && chatAny?.type) {
+        await upsertTgChat(chatAny);
+    }
+
     const text = getText(update);
     const chat = getChat(update);
     const chatId = getChatId(update);
