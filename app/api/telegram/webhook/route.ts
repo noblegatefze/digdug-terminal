@@ -284,4 +284,4 @@ You have <b>${graceMinutes} minutes</b> to verify your Terminal Pass or you will
 
         return NextResponse.json({ ok: true });
     }
-
+}
