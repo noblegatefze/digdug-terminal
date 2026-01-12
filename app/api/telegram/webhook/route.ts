@@ -55,7 +55,6 @@ async function upsertTgChat(chat: TgChat) {
   };
 
   const { error } = await supabaseAdmin.from("dd_tg_chats").upsert(payload, { onConflict: "chat_id" });
-
   if (error) console.error("[tg] dd_tg_chats upsert error:", error);
 }
 
@@ -85,6 +84,10 @@ function generateVerifyCode() {
   return out;
 }
 
+function looksLikeEvmAddress(a: string) {
+  return /^0x[a-fA-F0-9]{8,}$/.test(a.trim());
+}
+
 export async function GET() {
   return new Response("Telegram webhook OK", { status: 200 });
 }
@@ -92,7 +95,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const update = await req.json();
 
-  // --- STEP 2B: persist chat metadata on ANY update ---
+  // --- persist chat metadata on ANY update ---
   const chatAny: TgChat | undefined =
     update?.message?.chat ??
     update?.edited_message?.chat ??
@@ -109,6 +112,52 @@ export async function POST(req: NextRequest) {
   const text = getText(update);
   const chat = getChat(update);
   const chatId = getChatId(update);
+
+  // ✅ Join detection even when "join messages" are disabled (chat_member updates)
+  const cm = update?.chat_member;
+  const cmChat = cm?.chat;
+  const cmNew = cm?.new_chat_member;
+  const cmStatus = cmNew?.status; // "member", "administrator", etc.
+  const cmUser = cmNew?.user;
+
+  if (cmChat?.id && (cmChat?.type === "group" || cmChat?.type === "supergroup") && cmUser?.id && cmStatus === "member") {
+    const groupChatId = Number(cmChat.id);
+    const tgUserId = Number(cmUser.id);
+
+    const graceMinutes = 10;
+    const graceExpiresAt = new Date(Date.now() + graceMinutes * 60 * 1000).toISOString();
+
+    const { error } = await supabaseAdmin
+      .from("dd_tg_pending_joins")
+      .upsert(
+        {
+          group_chat_id: String(groupChatId),
+          tg_user_id: tgUserId,
+          grace_expires_at: graceExpiresAt,
+          warned_at: new Date().toISOString(),
+          status: "PENDING",
+        },
+        { onConflict: "group_chat_id,tg_user_id" }
+      );
+
+    if (error) console.error("[tg] pending join upsert error (chat_member):", error);
+
+    const first = cmUser?.first_name ? ` ${cmUser.first_name}` : "";
+    await sendMessage(
+      groupChatId,
+      `Welcome${first}.
+
+Verification required (Phase Zero testers only)
+
+You have ${graceMinutes} minutes to verify your Terminal Pass or you will be removed.
+
+Step 1: DM @DigsterBot and type /verify
+Step 2: Go to https://digdug.do and in Terminal type:
+verify DG-XXXX`
+    );
+
+    return NextResponse.json({ ok: true });
+  }
 
   console.log("TG UPDATE:", {
     chatId,
@@ -265,7 +314,73 @@ Claim: ${claimCode}
 Token: ${ev.token} (${ev.chain})
 Value: $${Number(ev.usd_value).toFixed(2)}
 
-We will process your reward shortly.`
+NEXT:
+1) Forward this message to @toastpunk
+2) Reply here with your USDT (BEP-20) address using:
+
+/usdt 0xYOURADDRESS
+
+After payment, you will receive a receipt confirmation.`
+    );
+
+    return NextResponse.json({ ok: true });
+  }
+
+  // ✅ /usdt (DM only) — store payout address for latest claim
+  if ((text === "/usdt" || text.startsWith("/usdt ")) && chat?.type === "private") {
+    const tgUserId = update?.message?.from?.id;
+
+    if (!tgUserId) {
+      await sendMessage(chatId, "Unable to identify your Telegram user.");
+      return NextResponse.json({ ok: true });
+    }
+
+    const parts = text.split(/\s+/).filter(Boolean);
+    const addr = String(parts[1] ?? "").trim();
+
+    if (!addr || !looksLikeEvmAddress(addr)) {
+      await sendMessage(chatId, "Usage: /usdt 0xYOURADDRESS (USDT BEP-20)");
+      return NextResponse.json({ ok: true });
+    }
+
+    // Find latest claim by this TG user
+    const { data: claims, error: cErr } = await supabaseAdmin
+      .from("dd_tg_golden_claims")
+      .select("id, claimed_at")
+      .eq("tg_user_id", tgUserId)
+      .order("claimed_at", { ascending: false })
+      .limit(1);
+
+    if (cErr) {
+      console.error("[usdt] claim lookup failed:", cErr);
+      await sendMessage(chatId, "Could not store address (server error). Try again later.");
+      return NextResponse.json({ ok: true });
+    }
+
+    const claim = claims?.[0] as any;
+    if (!claim?.id) {
+      await sendMessage(chatId, "No recent claim found. Claim a Golden Find first using /claim GF-XXXX.");
+      return NextResponse.json({ ok: true });
+    }
+
+    const { error: uErr } = await supabaseAdmin
+      .from("dd_tg_golden_claims")
+      .update({ payout_usdt_bep20: addr })
+      .eq("id", claim.id);
+
+    if (uErr) {
+      console.error("[usdt] update failed:", uErr);
+      await sendMessage(chatId, "Could not store address (server error). Try again later.");
+      return NextResponse.json({ ok: true });
+    }
+
+    await sendMessage(
+      chatId,
+      `Payout address saved.
+
+USDT (BEP-20): ${addr}
+
+We will pay and then send you a receipt confirmation.`
     );
 
     return NextResponse.json({ ok: true });
@@ -277,11 +392,12 @@ We will process your reward shortly.`
       chatId,
       `Welcome to DIGSTER
 
-This bot supports DIGDUG.DO Phase Zero.
+Commands (DM):
+- /verify
+- /claim GF-XXXX
+- /usdt 0xYOURADDRESS (USDT BEP-20)
 
-Commands:
-- /verify (DM only)
-- /claim GF-XXXX (DM only)
+Group:
 - /ping
 - /chatid`
     );
@@ -290,7 +406,7 @@ Commands:
 
   // ✅ /help
   if (text === "/help") {
-    await sendMessage(chatId, `Commands:\n/verify\n/claim GF-XXXX\n/ping\n/chatid`);
+    await sendMessage(chatId, `Commands:\n/verify\n/claim GF-XXXX\n/usdt 0xYOURADDRESS\n/ping\n/chatid`);
     return NextResponse.json({ ok: true });
   }
 
@@ -310,7 +426,7 @@ Commands:
     return NextResponse.json({ ok: true });
   }
 
-  // ✅ User joined group (NEW-ONLY SOFT GATE)
+  // ✅ User joined group (NEW-ONLY SOFT GATE) — message-based join
   const msg = getMsg(update);
   const newMembers = msg?.new_chat_members;
 
