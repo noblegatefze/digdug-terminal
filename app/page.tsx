@@ -1900,6 +1900,7 @@ export default function Page() {
           usd_value: usdValue,            // numeric
           token: sym,                     // token symbol
           chain: campaign.deployChainId,  // ETH/BNB/SOL/ARB/BASE
+          username: authedUser,
         }),
       }).catch(() => {});
     } catch {
