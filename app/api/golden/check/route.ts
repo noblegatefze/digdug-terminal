@@ -19,7 +19,10 @@ const GOLD_MIN = 5;
 const GOLD_MAX = 20;
 const DAILY_CAP = 5;
 
-function todayUTC(): string {
+// Hard floor so it can’t rapid-fire even if lots of users dig
+const MIN_GAP_FLOOR_SECONDS = 2 * 60 * 60; // 2 hours
+
+function todayUTCDateString(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
@@ -31,7 +34,6 @@ function genClaimCode() {
 }
 
 function msUntilNextUtcReset(now = new Date()): number {
-  // next UTC midnight
   const y = now.getUTCFullYear();
   const m = now.getUTCMonth();
   const d = now.getUTCDate();
@@ -45,10 +47,7 @@ function formatHMS(ms: number): string {
   const rem = total % 3600;
   const min = Math.floor(rem / 60);
   const sec = rem % 60;
-  const hh = String(h).padStart(2, "0");
-  const mm = String(min).padStart(2, "0");
-  const ss = String(sec).padStart(2, "0");
-  return `${hh}:${mm}:${ss}`;
+  return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
 }
 
 function buildMessage(p: {
@@ -82,24 +81,14 @@ function buildMessage(p: {
 function inferBroadcastSent(out: any): boolean {
   if (!out) return false;
   if (out.ok === false) return false;
-
-  // ✅ your broadcast route returns this reliably
   const sent = out?.counts?.sent;
   if (typeof sent === "number") return sent > 0;
-
-  // fallback (older shapes)
-  if (typeof out.sent === "number") return out.sent > 0;
-  if (Array.isArray(out.results)) return out.results.length > 0;
-  if (Array.isArray(out.sent_ids)) return out.sent_ids.length > 0;
-
   return false;
 }
 
 export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
-  if (!body) {
-    return NextResponse.json({ ok: false, error: "bad_json" }, { status: 400 });
-  }
+  if (!body) return NextResponse.json({ ok: false, error: "bad_json" }, { status: 400 });
 
   const usdValue = Number(body.usd_value);
   const token = String(body.token ?? "").trim();
@@ -109,17 +98,24 @@ export async function POST(req: Request) {
   if (!Number.isFinite(usdValue) || usdValue < GOLD_MIN || usdValue > GOLD_MAX) {
     return NextResponse.json({ ok: true, golden: false, reason: "out_of_range" });
   }
+  if (!token || !chain) return NextResponse.json({ ok: true, golden: false, reason: "missing_token_or_chain" });
 
-  if (!token || !chain) {
-    return NextResponse.json({ ok: true, golden: false, reason: "missing_token_or_chain" });
-  }
+  const dayStr = todayUTCDateString();
 
-  const day = todayUTC();
+  // Dynamic pacing:
+  // Spread remaining slots across remaining time with a floor (2h).
+  // We don’t know remaining slots until after RPC reads the row,
+  // so we use a conservative baseline: 24h/5 * 0.6 ≈ 2.88h, floored at 2h.
+  const msLeft = msUntilNextUtcReset(new Date());
+  const baselineGap = Math.floor((msLeft / 1000) / DAILY_CAP * 0.6);
+  const minGapSeconds = Math.max(MIN_GAP_FLOOR_SECONDS, baselineGap);
 
-  // 1) Atomically take a daily slot (prevents race conditions)
-  type GoldenSlot = { allowed: boolean; new_count: number };
+  // 1) Atomically take a paced daily slot
+  type GoldenSlot = { allowed: boolean; new_count: number; next_allowed_at: string | null };
 
-  const { data: slot, error: slotErr } = await supabaseAdmin.rpc("dd_take_golden_slot", { p_day: day, p_cap: DAILY_CAP }).single<GoldenSlot>();
+  const { data: slot, error: slotErr } = await supabaseAdmin
+    .rpc("dd_take_golden_slot", { p_day: dayStr, p_cap: DAILY_CAP, p_min_gap_seconds: minGapSeconds })
+    .single<GoldenSlot>();
 
   if (slotErr) {
     console.error("[golden] slot rpc failed:", slotErr);
@@ -127,23 +123,24 @@ export async function POST(req: Request) {
   }
 
   if (!slot?.allowed) {
-    return NextResponse.json({ ok: true, golden: false, reason: "daily_cap_reached" });
+    return NextResponse.json({
+      ok: true,
+      golden: false,
+      reason: "paced_or_capped",
+      next_allowed_at: slot?.next_allowed_at ?? null,
+    });
   }
 
-  // 2) Resolve terminal user (required to award real rewards)
-  if (!username) {
-    return NextResponse.json({ ok: true, golden: false, reason: "missing_username" });
-  }
+  // 2) Resolve terminal user
+  if (!username) return NextResponse.json({ ok: true, golden: false, reason: "missing_username" });
 
-  const { data: users, error: uErr } = await supabaseAdmin.from("dd_terminal_users").select("id, username").eq("username", username).limit(1);
+  const { data: users, error: uErr } = await supabaseAdmin.from("dd_terminal_users").select("id").eq("username", username).limit(1);
 
-  if (uErr || !users?.[0]?.id) {
-    return NextResponse.json({ ok: true, golden: false, reason: "terminal_user_not_found" });
-  }
+  if (uErr || !users?.[0]?.id) return NextResponse.json({ ok: true, golden: false, reason: "terminal_user_not_found" });
 
   const terminal_user_id = users[0].id as string;
 
-  // Optional: attach tg_user_id if already linked
+  // Optional: attach tg_user_id if linked
   const { data: linkRows } = await supabaseAdmin
     .from("dd_tg_verify_codes")
     .select("tg_user_id")
@@ -154,8 +151,7 @@ export async function POST(req: Request) {
 
   const tg_user_id = (linkRows?.[0] as any)?.tg_user_id ?? null;
 
-  // 3) Insert golden event with claim code
-  // NOTE: broadcasted_at should reflect actual broadcast time; store null first, then update after successful send.
+  // 3) Insert event (broadcasted_at set only after successful send)
   let claim_code = genClaimCode();
   let golden_event_id: string | null = null;
 
@@ -163,7 +159,7 @@ export async function POST(req: Request) {
     const { data: inserted, error: insErr } = await supabaseAdmin
       .from("dd_tg_golden_events")
       .insert({
-        day,
+        day: dayStr,
         claim_code,
         terminal_user_id,
         terminal_username: username,
@@ -186,13 +182,12 @@ export async function POST(req: Request) {
       claim_code = genClaimCode();
       continue;
     }
-
     console.error("[golden] insert event failed:", insErr);
     return NextResponse.json({ ok: false, error: "golden_event_insert_failed" }, { status: 500 });
   }
 
-  // 4) Broadcast (ASCII) — include slot + UTC reset timer
-  const timeLeftHMS = formatHMS(msUntilNextUtcReset(new Date()));
+  // 4) Broadcast message
+  const timeLeftHMS = formatHMS(msLeft);
   const message = buildMessage({
     token,
     chain,
@@ -205,10 +200,7 @@ export async function POST(req: Request) {
 
   const br = await fetch(`${SITE}/api/admin/telegram/broadcast`, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-admin-key": ADMIN_KEY,
-    },
+    headers: { "content-type": "application/json", "x-admin-key": ADMIN_KEY },
     body: JSON.stringify({
       mode: "send",
       message,
@@ -221,13 +213,8 @@ export async function POST(req: Request) {
   const out = await br.json().catch(() => ({}));
   const broadcast_sent = inferBroadcastSent(out);
 
-  // Update broadcasted_at only if we actually sent
   if (broadcast_sent && golden_event_id) {
-    const { error: bErr } = await supabaseAdmin
-      .from("dd_tg_golden_events")
-      .update({ broadcasted_at: new Date().toISOString() })
-      .eq("id", golden_event_id);
-
+    const { error: bErr } = await supabaseAdmin.from("dd_tg_golden_events").update({ broadcasted_at: new Date().toISOString() }).eq("id", golden_event_id);
     if (bErr) console.error("[golden] broadcasted_at update failed:", bErr);
   }
 
@@ -237,12 +224,15 @@ export async function POST(req: Request) {
     claim_code,
     terminal_user_id,
     tg_user_id,
-    // ✅ explicit fields for terminal sync
     golden_slot: Number(slot?.new_count ?? 0),
     golden_cap: DAILY_CAP,
     utc_reset_in: timeLeftHMS,
     broadcast_sent,
     broadcast_message: broadcast_sent ? message : null,
     broadcast: out,
+    pacing: {
+      min_gap_seconds: minGapSeconds,
+      next_allowed_at: slot?.next_allowed_at ?? null,
+    },
   });
 }
