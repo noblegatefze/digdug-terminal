@@ -7,16 +7,14 @@ function reqEnv(name: string) {
   return v;
 }
 
-const supabaseAdmin = createClient(
-  reqEnv("SUPABASE_URL"),
-  reqEnv("SUPABASE_SERVICE_ROLE_KEY"),
-  { auth: { persistSession: false } }
-);
+const supabaseAdmin = createClient(reqEnv("SUPABASE_URL"), reqEnv("SUPABASE_SERVICE_ROLE_KEY"), {
+  auth: { persistSession: false },
+});
 
 const SITE = process.env.NEXT_PUBLIC_SITE_URL || "https://digdug.do";
 const ADMIN_KEY = reqEnv("ADMIN_API_KEY");
 
-// Golden Find rules
+// Golden Find rules (LOCKED)
 const GOLD_MIN = 5;
 const GOLD_MAX = 20;
 const DAILY_CAP = 5;
@@ -32,7 +30,36 @@ function genClaimCode() {
   return out;
 }
 
-function buildMessage(p: { token: string; chain: string; usd: number; claim: string }) {
+function msUntilNextUtcReset(now = new Date()): number {
+  // next UTC midnight
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth();
+  const d = now.getUTCDate();
+  const next = new Date(Date.UTC(y, m, d + 1, 0, 0, 0, 0));
+  return Math.max(0, next.getTime() - now.getTime());
+}
+
+function formatHMS(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const rem = total % 3600;
+  const min = Math.floor(rem / 60);
+  const sec = rem % 60;
+  const hh = String(h).padStart(2, "0");
+  const mm = String(min).padStart(2, "0");
+  const ss = String(sec).padStart(2, "0");
+  return `${hh}:${mm}:${ss}`;
+}
+
+function buildMessage(p: {
+  token: string;
+  chain: string;
+  usd: number;
+  claim: string;
+  slotNumber: number;
+  slotCap: number;
+  timeLeftHMS: string;
+}) {
   return [
     "GOLDEN FIND",
     "",
@@ -40,13 +67,32 @@ function buildMessage(p: { token: string; chain: string; usd: number; claim: str
     `Token: ${p.token} (${p.chain})`,
     `Reward value: $${p.usd.toFixed(2)}`,
     "",
+    `Golden Find ${p.slotNumber}/${p.slotCap}`,
+    `UTC reset in: ${p.timeLeftHMS}`,
+    "",
     "Sponsored by ToastPunk",
     "",
     `CLAIM: DM @DigsterBot and send: /claim ${p.claim}`,
     "Note: you must be verified (DM /verify, then type verify DG-XXXX in Terminal).",
     "",
-    "Digging continues."
+    "Digging continues.",
   ].join("\n");
+}
+
+function inferBroadcastSent(out: any): boolean {
+  if (!out) return false;
+  if (out.ok === false) return false;
+
+  // ✅ your broadcast route returns this reliably
+  const sent = out?.counts?.sent;
+  if (typeof sent === "number") return sent > 0;
+
+  // fallback (older shapes)
+  if (typeof out.sent === "number") return out.sent > 0;
+  if (Array.isArray(out.results)) return out.results.length > 0;
+  if (Array.isArray(out.sent_ids)) return out.sent_ids.length > 0;
+
+  return false;
 }
 
 export async function POST(req: Request) {
@@ -73,9 +119,7 @@ export async function POST(req: Request) {
   // 1) Atomically take a daily slot (prevents race conditions)
   type GoldenSlot = { allowed: boolean; new_count: number };
 
-  const { data: slot, error: slotErr } = await supabaseAdmin
-    .rpc("dd_take_golden_slot", { p_day: day, p_cap: DAILY_CAP })
-    .single<GoldenSlot>();
+  const { data: slot, error: slotErr } = await supabaseAdmin.rpc("dd_take_golden_slot", { p_day: day, p_cap: DAILY_CAP }).single<GoldenSlot>();
 
   if (slotErr) {
     console.error("[golden] slot rpc failed:", slotErr);
@@ -91,11 +135,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, golden: false, reason: "missing_username" });
   }
 
-  const { data: users, error: uErr } = await supabaseAdmin
-    .from("dd_terminal_users")
-    .select("id, username")
-    .eq("username", username)
-    .limit(1);
+  const { data: users, error: uErr } = await supabaseAdmin.from("dd_terminal_users").select("id, username").eq("username", username).limit(1);
 
   if (uErr || !users?.[0]?.id) {
     return NextResponse.json({ ok: true, golden: false, reason: "terminal_user_not_found" });
@@ -115,22 +155,31 @@ export async function POST(req: Request) {
   const tg_user_id = (linkRows?.[0] as any)?.tg_user_id ?? null;
 
   // 3) Insert golden event with claim code
+  // NOTE: broadcasted_at should reflect actual broadcast time; store null first, then update after successful send.
   let claim_code = genClaimCode();
+  let golden_event_id: string | null = null;
 
   for (let i = 0; i < 4; i++) {
-    const { error: insErr } = await supabaseAdmin.from("dd_tg_golden_events").insert({
-      day,
-      claim_code,
-      terminal_user_id,
-      terminal_username: username,
-      tg_user_id,
-      token,
-      chain,
-      usd_value: usdValue,
-      broadcasted_at: new Date().toISOString()
-    });
+    const { data: inserted, error: insErr } = await supabaseAdmin
+      .from("dd_tg_golden_events")
+      .insert({
+        day,
+        claim_code,
+        terminal_user_id,
+        terminal_username: username,
+        tg_user_id,
+        token,
+        chain,
+        usd_value: usdValue,
+        broadcasted_at: null,
+      })
+      .select("id")
+      .limit(1);
 
-    if (!insErr) break;
+    if (!insErr) {
+      golden_event_id = (inserted?.[0] as any)?.id ?? null;
+      break;
+    }
 
     const msg = String((insErr as any)?.message ?? "").toLowerCase();
     if (msg.includes("duplicate")) {
@@ -142,25 +191,45 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "golden_event_insert_failed" }, { status: 500 });
   }
 
-  // 4) Broadcast (ASCII)
-  const message = buildMessage({ token, chain, usd: usdValue, claim: claim_code });
+  // 4) Broadcast (ASCII) — include slot + UTC reset timer
+  const timeLeftHMS = formatHMS(msUntilNextUtcReset(new Date()));
+  const message = buildMessage({
+    token,
+    chain,
+    usd: usdValue,
+    claim: claim_code,
+    slotNumber: Number(slot?.new_count ?? 0),
+    slotCap: DAILY_CAP,
+    timeLeftHMS,
+  });
 
   const br = await fetch(`${SITE}/api/admin/telegram/broadcast`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-admin-key": ADMIN_KEY
+      "x-admin-key": ADMIN_KEY,
     },
     body: JSON.stringify({
       mode: "send",
       message,
       includeTypes: ["supergroup"],
       maxSend: 1,
-      delayMs: 400
-    })
+      delayMs: 400,
+    }),
   });
 
   const out = await br.json().catch(() => ({}));
+  const broadcast_sent = inferBroadcastSent(out);
+
+  // Update broadcasted_at only if we actually sent
+  if (broadcast_sent && golden_event_id) {
+    const { error: bErr } = await supabaseAdmin
+      .from("dd_tg_golden_events")
+      .update({ broadcasted_at: new Date().toISOString() })
+      .eq("id", golden_event_id);
+
+    if (bErr) console.error("[golden] broadcasted_at update failed:", bErr);
+  }
 
   return NextResponse.json({
     ok: true,
@@ -168,6 +237,12 @@ export async function POST(req: Request) {
     claim_code,
     terminal_user_id,
     tg_user_id,
-    broadcast: out
+    // ✅ explicit fields for terminal sync
+    golden_slot: Number(slot?.new_count ?? 0),
+    golden_cap: DAILY_CAP,
+    utc_reset_in: timeLeftHMS,
+    broadcast_sent,
+    broadcast_message: broadcast_sent ? message : null,
+    broadcast: out,
   });
 }

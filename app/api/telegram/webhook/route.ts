@@ -4,7 +4,9 @@ import { createClient } from "@supabase/supabase-js";
 const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN!;
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 
-async function sendMessage(chatId: number, text: string) {
+type InlineKeyboard = { inline_keyboard: Array<Array<{ text: string; url?: string; callback_data?: string }>> };
+
+async function sendMessage(chatId: number, text: string, opts?: { replyMarkup?: InlineKeyboard }) {
   await fetch(`${TELEGRAM_API}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -13,6 +15,7 @@ async function sendMessage(chatId: number, text: string) {
       text,
       parse_mode: "HTML",
       disable_web_page_preview: true,
+      ...(opts?.replyMarkup ? { reply_markup: opts.replyMarkup } : {}),
     }),
   });
 }
@@ -88,6 +91,83 @@ function looksLikeEvmAddress(a: string) {
   return /^0x[a-fA-F0-9]{8,}$/.test(a.trim());
 }
 
+function tgDeepLinkVerify() {
+  // /start payload: user taps -> opens bot DM (or bot) with start param
+  return "https://t.me/DigsterBot?start=verify";
+}
+
+function verifyButton(): InlineKeyboard {
+  return {
+    inline_keyboard: [[{ text: "✅ Verify now", url: tgDeepLinkVerify() }]],
+  };
+}
+
+function welcomeText(firstName?: string, graceMinutes = 10) {
+  const first = firstName ? ` ${firstName}` : "";
+  return `Welcome${first}.
+
+<b>Verification required</b> (Phase Zero testers)
+
+You have <b>${graceMinutes} minutes</b> to verify your Terminal Pass or you will be removed.
+
+<b>Step 1:</b> DM @DigsterBot and type <code>/verify</code>
+<b>Step 2:</b> Go to https://digdug.do and in Terminal type:
+<code>verify DG-XXXX</code>`;
+}
+
+function reminderText(minutesLeft: number) {
+  // Keep this short + loud + exact next step
+  return `⚠️ <b>Verification required</b>
+
+You have <b>${minutesLeft} minute${minutesLeft === 1 ? "" : "s"}</b> left to verify or you will be removed.
+
+DM @DigsterBot and type <code>/verify</code>`;
+}
+
+async function maybeSendGraceExpiryReminders() {
+  // Reminder window: users expiring within next 2 minutes
+  // Requires dd_tg_pending_joins.reminded_at timestamptz NULL
+  const now = new Date();
+  const soon = new Date(now.getTime() + 2 * 60 * 1000);
+
+  const nowIso = now.toISOString();
+  const soonIso = soon.toISOString();
+
+  const { data: rows, error } = await supabaseAdmin
+    .from("dd_tg_pending_joins")
+    .select("group_chat_id,tg_user_id,grace_expires_at,reminded_at,status")
+    .eq("status", "PENDING")
+    .is("reminded_at", null)
+    .gt("grace_expires_at", nowIso)
+    .lte("grace_expires_at", soonIso)
+    .limit(25);
+
+  if (error) {
+    console.error("[tg] reminder query failed:", error);
+    return;
+  }
+
+  if (!rows || rows.length === 0) return;
+
+  for (const r of rows as any[]) {
+    const groupChatId = Number(r.group_chat_id);
+    const expiresAt = new Date(r.grace_expires_at);
+    const minsLeft = Math.max(1, Math.ceil((expiresAt.getTime() - now.getTime()) / (60 * 1000)));
+
+    // Send reminder + verify button
+    await sendMessage(groupChatId, reminderText(minsLeft), { replyMarkup: verifyButton() });
+
+    // Mark reminded (atomic enough for our use; if double-called, worst case is 2 reminders in rare race)
+    const { error: uErr } = await supabaseAdmin
+      .from("dd_tg_pending_joins")
+      .update({ reminded_at: new Date().toISOString() })
+      .eq("group_chat_id", String(groupChatId))
+      .eq("tg_user_id", Number(r.tg_user_id));
+
+    if (uErr) console.error("[tg] reminder update failed:", uErr);
+  }
+}
+
 export async function GET() {
   return new Response("Telegram webhook OK", { status: 200 });
 }
@@ -108,6 +188,10 @@ export async function POST(req: NextRequest) {
   if (chatAny?.id && chatAny?.type) {
     await upsertTgChat(chatAny);
   }
+
+  // ✅ NEW: opportunistic reminder sweep (no cron needed)
+  // Runs on any webhook update; only sends when rows are within the window + not yet reminded.
+  await maybeSendGraceExpiryReminders();
 
   const text = getText(update);
   const chat = getChat(update);
@@ -136,25 +220,14 @@ export async function POST(req: NextRequest) {
           grace_expires_at: graceExpiresAt,
           warned_at: new Date().toISOString(),
           status: "PENDING",
+          // reminded_at intentionally not set
         },
         { onConflict: "group_chat_id,tg_user_id" }
       );
 
     if (error) console.error("[tg] pending join upsert error (chat_member):", error);
 
-    const first = cmUser?.first_name ? ` ${cmUser.first_name}` : "";
-    await sendMessage(
-      groupChatId,
-      `Welcome${first}.
-
-Verification required (Phase Zero testers only)
-
-You have ${graceMinutes} minutes to verify your Terminal Pass or you will be removed.
-
-Step 1: DM @DigsterBot and type /verify
-Step 2: Go to https://digdug.do and in Terminal type:
-verify DG-XXXX`
-    );
+    await sendMessage(groupChatId, welcomeText(cmUser?.first_name, graceMinutes), { replyMarkup: verifyButton() });
 
     return NextResponse.json({ ok: true });
   }
@@ -363,10 +436,7 @@ After payment, you will receive a receipt confirmation.`
       return NextResponse.json({ ok: true });
     }
 
-    const { error: uErr } = await supabaseAdmin
-      .from("dd_tg_golden_claims")
-      .update({ payout_usdt_bep20: addr })
-      .eq("id", claim.id);
+    const { error: uErr } = await supabaseAdmin.from("dd_tg_golden_claims").update({ payout_usdt_bep20: addr }).eq("id", claim.id);
 
     if (uErr) {
       console.error("[usdt] update failed:", uErr);
@@ -455,19 +525,7 @@ Group:
 
         if (error) console.error("[tg] pending join upsert error:", error);
 
-        const first = m?.first_name ? ` ${m.first_name}` : "";
-        await sendMessage(
-          chatId,
-          `Welcome${first}.
-
-Verification required (Phase Zero testers only)
-
-You have ${graceMinutes} minutes to verify your Terminal Pass or you will be removed.
-
-Step 1: DM @DigsterBot and type /verify
-Step 2: Go to https://digdug.do and in Terminal type:
-verify DG-XXXX`
-        );
+        await sendMessage(chatId, welcomeText(m?.first_name, graceMinutes), { replyMarkup: verifyButton() });
       }
 
       return NextResponse.json({ ok: true });

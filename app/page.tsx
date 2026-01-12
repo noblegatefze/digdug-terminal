@@ -1891,7 +1891,7 @@ export default function Page() {
       reward_value_usd: usdValue,
     });
 
-    // Golden Find trigger (fire-and-forget, ASCII broadcast, max 5/day)
+    // Golden Find trigger (server-decided; Terminal only speaks if TG broadcast actually sent)
     try {
       fetch("/api/golden/check", {
         method: "POST",
@@ -1902,20 +1902,19 @@ export default function Page() {
           chain: campaign.deployChainId,  // ETH/BNB/SOL/ARB/BASE
           username: authedUser,
         }),
-      }).catch(() => { });
+      })
+        .then((r) => r.json().catch(() => null))
+        .then((out) => {
+          // Only show terminal UX if TG broadcast actually happened
+          if (out?.ok && out?.golden && out?.broadcast_sent === true && typeof out?.broadcast_message === "string") {
+            emit("warn", "GOLDEN FIND");
+            emit("sys", out.broadcast_message);
+            emit("sys", "Claim code is in Telegram: https://t.me/digdugdo");
+          }
+        })
+        .catch(() => { });
     } catch {
       // ignore
-    }
-
-    if (usdValue != null) emit("ok", `${tier} — +${rewardAmt.toFixed(6)} ${sym} (~$${fmtUsdValue(usdValue)})`);
-    else emit("ok", `${tier} — +${rewardAmt.toFixed(6)} ${sym}`);
-    // UX hint: golden finds are decided server-side + announced in Telegram
-    // UX hint: golden finds are decided server-side + announced in Telegram
-    if (usdValue != null && usdValue >= 5 && usdValue <= 20) {
-      emit(
-        "info",
-        "This dig may qualify as a GOLDEN FIND. Check Telegram for the claim code: https://t.me/digdugdo"
-      );
     }
 
   };
