@@ -1891,6 +1891,21 @@ export default function Page() {
       reward_value_usd: usdValue,
     });
 
+        // Golden Find trigger (fire-and-forget, ASCII broadcast, max 5/day)
+    try {
+      fetch("/api/golden/check", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          usd_value: usdValue,            // numeric
+          token: sym,                     // token symbol
+          chain: campaign.deployChainId,  // ETH/BNB/SOL/ARB/BASE
+        }),
+      }).catch(() => {});
+    } catch {
+      // ignore
+    }
+
     if (usdValue != null) emit("ok", `${tier} — +${rewardAmt.toFixed(6)} ${sym} (~$${fmtUsdValue(usdValue)})`);
     else emit("ok", `${tier} — +${rewardAmt.toFixed(6)} ${sym}`);
   };
