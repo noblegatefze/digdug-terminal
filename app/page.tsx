@@ -1905,9 +1905,8 @@ export default function Page() {
       })
         .then((r) => r.json().catch(() => null))
         .then((out) => {
-          // Only show terminal UX if TG broadcast actually happened
           if (out?.ok && out?.golden && out?.broadcast_sent === true && typeof out?.broadcast_message === "string") {
-            emit("warn", "GOLDEN FIND");
+            // broadcast_message already contains the "GOLDEN FIND" header
             emit("sys", out.broadcast_message);
             emit("sys", "Claim code is in Telegram: https://t.me/digdugdo");
           }
@@ -1916,6 +1915,15 @@ export default function Page() {
     } catch {
       // ignore
     }
+
+    // ALWAYS show normal dig result (this was missing)
+    try {
+      if (usdValue != null) emit("ok", `${tier} — +${rewardAmt.toFixed(6)} ${sym} (~$${fmtUsdValue(usdValue)})`);
+      else emit("ok", `${tier} — +${rewardAmt.toFixed(6)} ${sym}`);
+    } catch {
+      emit("ok", `${tier} — +${rewardAmt.toFixed(6)} ${sym}`);
+    }
+
 
   };
 
