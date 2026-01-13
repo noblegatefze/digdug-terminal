@@ -8,6 +8,20 @@ function reqEnv(name: string) {
 
 const ADMIN_KEY = reqEnv("ADMIN_API_KEY");
 
+function fmtNextAllowed(nextAllowedAt: any): string {
+  if (!nextAllowedAt) return "NOW";
+  const t = new Date(String(nextAllowedAt)).getTime();
+  if (!Number.isFinite(t)) return "N/A";
+  const now = Date.now();
+  if (t <= now) return "NOW";
+  const mins = Math.ceil((t - now) / 60000);
+  if (mins <= 1) return "NOW";
+  if (mins < 60) return `in ${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  const rem = mins % 60;
+  return `in ${hrs}h ${rem}m`;
+}
+
 function asciiGstatsMessage(data: any) {
   const attempts = Number(data?.digs_attempted ?? 0);
   const finds = Number(data?.digs_succeeded ?? 0);
@@ -24,20 +38,36 @@ function asciiGstatsMessage(data: any) {
   const boxesCreated = data?.boxes_created ?? null;
   const boxesLiveNow = data?.boxes_live_now ?? null;
 
+  // ✅ Golden Find stats (added in /api/stats/summary)
+  const goldenToday = Number(data?.golden_today ?? 0);
+  const goldenCap = Number(data?.golden_cap ?? 5);
+  const goldenResetIn = String(data?.golden_reset_in ?? "N/A");
+  const goldenNextAllowedAt = data?.golden_next_allowed_at ?? null;
+
   const lines: string[] = [];
   lines.push("DIGDUG.DO — GLOBAL PULSE (6H)");
   lines.push("");
+
   lines.push("NETWORK");
   lines.push(`- Sessions: ${totalSessions}`);
   lines.push(`- Active now (5m): ${activeNow}`);
   lines.push(`- Daily diggers (today): ${dailyActive}`);
   lines.push("");
+
   lines.push("DIGGING");
   lines.push(`- Attempts: ${attempts}`);
   lines.push(`- Finds: ${finds}`);
   lines.push(`- Find rate: ${rate.toFixed(2)}%`);
   if (rejected > 0) lines.push(`- Rejected: ${rejected}`);
   lines.push("");
+
+  // ✅ Golden section
+  lines.push("GOLDEN FINDS");
+  lines.push(`- Today: ${goldenToday}/${goldenCap}`);
+  lines.push(`- Next allowed: ${fmtNextAllowed(goldenNextAllowedAt)}`);
+  lines.push(`- UTC reset in: ${goldenResetIn}`);
+  lines.push("");
+
   lines.push("FUEL");
   lines.push(`- USDDD spent: ${usdddSpent == null ? "N/A" : usdddSpent.toFixed(2)}`);
   if (usdddSpent != null) {
@@ -91,7 +121,6 @@ export async function GET() {
       mode: "send",
       message,
       includeTypes: ["group", "supergroup"],
-      // keep this safe
       maxSend: 25,
       delayMs: 350,
     }),
