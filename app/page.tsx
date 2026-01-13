@@ -1819,6 +1819,30 @@ export default function Page() {
     emit("sys", "dig: generating entropy...");
     emit("sys", "[##########] 100%");
 
+    // Golden Find window status (read-only UX)
+    try {
+      const r = await fetch("/api/stats/summary", { method: "GET" });
+      if (r.ok) {
+        const s = await r.json().catch(() => null);
+        if (s) {
+          const gToday = Number(s.golden_today ?? 0);
+          const gCap = Number(s.golden_cap ?? 5);
+          const nextAt = s.golden_next_allowed_at ? new Date(String(s.golden_next_allowed_at)).getTime() : null;
+
+          if (gToday >= gCap) {
+            emit("sys", "Golden Find window: CLOSED (daily cap reached)");
+          } else if (nextAt && nextAt > Date.now()) {
+            const mins = Math.ceil((nextAt - Date.now()) / 60000);
+            emit("sys", `Golden Find window: locked (next possible in ~${mins}m)`);
+          } else {
+            emit("sys", "Golden Find window: OPEN");
+          }
+        }
+      }
+    } catch {
+      // silent — stats UX should never block a dig
+    }
+
     const rewardAmt = computeReward(campaign);
     const sym = campaign.tokenSymbol ?? "TOKEN";
     const tier = findTier(campaign, rewardAmt);
