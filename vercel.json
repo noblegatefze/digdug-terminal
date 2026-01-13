@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/cron/gstats-broadcast",
-      "schedule": "0 */12 * * *"
+      "schedule": "0 */6 * * *"
     }
   ]
 }

@@ -25,7 +25,7 @@ function asciiGstatsMessage(data: any) {
   const boxesLiveNow = data?.boxes_live_now ?? null;
 
   const lines: string[] = [];
-  lines.push("DIGDUG.DO — GLOBAL PULSE (12H)");
+  lines.push("DIGDUG.DO — GLOBAL PULSE (6H)");
   lines.push("");
   lines.push("NETWORK");
   lines.push(`- Sessions: ${totalSessions}`);
