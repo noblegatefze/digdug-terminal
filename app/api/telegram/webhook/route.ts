@@ -50,6 +50,10 @@ function reqEnv(name: string) {
   return v;
 }
 
+function envOptional(name: string) {
+  return process.env[name] || "";
+}
+
 // Service-role Supabase client (server-only)
 const supabaseAdmin = createClient(reqEnv("SUPABASE_URL"), reqEnv("SUPABASE_SERVICE_ROLE_KEY"), {
   auth: { persistSession: false },
@@ -135,6 +139,25 @@ function maskEvmAddress(addr: string) {
   return `${a.slice(0, 6)}…${a.slice(-4)}`;
 }
 
+function looksLikeTxHash(h: string) {
+  const s = h.trim();
+  if (/^0x[a-fA-F0-9]{16,}$/.test(s)) return true;
+  // allow bscscan link
+  if (s.includes("bscscan.com/tx/")) return true;
+  return false;
+}
+
+function extractTxHashOrLink(input: string): { txHash: string | null; txUrl: string | null } {
+  const s = input.trim();
+  const m = s.match(/bscscan\.com\/tx\/(0x[a-fA-F0-9]{16,})/);
+  if (m?.[1]) {
+    const tx = m[1];
+    return { txHash: tx, txUrl: `https://bscscan.com/tx/${tx}` };
+  }
+  if (/^0x[a-fA-F0-9]{16,}$/.test(s)) return { txHash: s, txUrl: `https://bscscan.com/tx/${s}` };
+  return { txHash: null, txUrl: null };
+}
+
 function tgDeepLinkVerify() {
   return "https://t.me/DigsterBot?start=verify";
 }
@@ -203,6 +226,39 @@ async function maybeSendGraceExpiryReminders() {
   }
 }
 
+function adminIdSet(): Set<number> {
+  const raw = envOptional("TG_ADMIN_USER_IDS")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const out = new Set<number>();
+  for (const s of raw) {
+    const n = Number(s);
+    if (Number.isFinite(n) && n > 0) out.add(n);
+  }
+  return out;
+}
+
+function isAdminUser(tgUserId: number): boolean {
+  const set = adminIdSet();
+  return set.size > 0 && set.has(tgUserId);
+}
+
+async function lookupTgUserLabel(tgUserId: number): Promise<string> {
+  // try dd_tg_chats for a nicer label (private chat metadata)
+  const { data } = await supabaseAdmin
+    .from("dd_tg_chats")
+    .select("title, username")
+    .eq("chat_id", String(tgUserId))
+    .limit(1);
+
+  const row = (data?.[0] as any) ?? null;
+  if (!row) return `TG:${tgUserId}`;
+  if (row.username) return `@${row.username}`;
+  if (row.title) return String(row.title);
+  return `TG:${tgUserId}`;
+}
+
 export async function GET() {
   return new Response("Telegram webhook OK", { status: 200 });
 }
@@ -266,6 +322,126 @@ export async function POST(req: NextRequest) {
 
   if (!chatId) return NextResponse.json({ ok: true });
 
+  // ✅ ADMIN /paid (GROUP ONLY)
+  if (text === "/paid" || text.startsWith("/paid ")) {
+    const u = fromUser(update);
+    const tgUserId = u?.id;
+    const who = displayName(update);
+    const isGroup = chat?.type === "group" || chat?.type === "supergroup";
+
+    if (!isGroup) {
+      await sendMessage(chatId, "Usage: /paid GF-XXXX 0xTXHASH (group only)");
+      return NextResponse.json({ ok: true });
+    }
+
+    if (!tgUserId || !isAdminUser(Number(tgUserId))) {
+      await sendMessage(chatId, `❌ ${who}: unauthorized.`);
+      return NextResponse.json({ ok: true });
+    }
+
+    const parts = text.split(/\s+/).filter(Boolean);
+    const claimCode = String(parts[1] ?? "").trim().toUpperCase();
+    const txIn = String(parts[2] ?? "").trim();
+
+    if (!claimCode.startsWith("GF-")) {
+      await sendMessage(chatId, "Usage: /paid GF-XXXX 0xTXHASH");
+      return NextResponse.json({ ok: true });
+    }
+    if (!txIn || !looksLikeTxHash(txIn)) {
+      await sendMessage(chatId, "Usage: /paid GF-XXXX 0xTXHASH (or bscscan link)");
+      return NextResponse.json({ ok: true });
+    }
+
+    const { txHash, txUrl } = extractTxHashOrLink(txIn);
+    if (!txHash || !txUrl) {
+      await sendMessage(chatId, "Invalid tx hash/link.");
+      return NextResponse.json({ ok: true });
+    }
+
+    // Find golden event by claim code
+    const { data: evRows, error: evErr } = await supabaseAdmin
+      .from("dd_tg_golden_events")
+      .select("id, token, chain, usd_value")
+      .eq("claim_code", claimCode)
+      .limit(1);
+
+    if (evErr) {
+      console.error("[paid] event lookup failed:", evErr);
+      await sendMessage(chatId, "Server error. Try again.");
+      return NextResponse.json({ ok: true });
+    }
+
+    const ev = (evRows?.[0] as any) ?? null;
+    if (!ev?.id) {
+      await sendMessage(chatId, `Claim code not found: ${claimCode}`);
+      return NextResponse.json({ ok: true });
+    }
+
+    // Find claim row for that event
+    const { data: claimRows, error: cErr } = await supabaseAdmin
+      .from("dd_tg_golden_claims")
+      .select("id, tg_user_id, group_chat_id, payout_usdt_bep20, paid_at, paid_tx_hash")
+      .eq("golden_event_id", ev.id)
+      .order("claimed_at", { ascending: false })
+      .limit(1);
+
+    if (cErr) {
+      console.error("[paid] claim lookup failed:", cErr);
+      await sendMessage(chatId, "Server error. Try again.");
+      return NextResponse.json({ ok: true });
+    }
+
+    const claim = (claimRows?.[0] as any) ?? null;
+    if (!claim?.id) {
+      await sendMessage(chatId, `No claim found for ${claimCode} (not claimed yet).`);
+      return NextResponse.json({ ok: true });
+    }
+
+    // Mark paid
+    const nowIso = new Date().toISOString();
+    const { error: uErr } = await supabaseAdmin
+      .from("dd_tg_golden_claims")
+      .update({
+        paid_at: nowIso,
+        paid_tx_hash: txHash,
+        paid_by_tg_user_id: Number(tgUserId),
+      })
+      .eq("id", claim.id);
+
+    if (uErr) {
+      console.error("[paid] update failed:", uErr);
+      await sendMessage(chatId, "Could not mark as paid (server error).");
+      return NextResponse.json({ ok: true });
+    }
+
+    const winnerLabel = await lookupTgUserLabel(Number(claim.tg_user_id));
+    const maskedAddr = claim.payout_usdt_bep20 ? maskEvmAddress(String(claim.payout_usdt_bep20)) : "N/A";
+
+    // Post receipt publicly (same group)
+    await sendMessage(
+      chatId,
+      `✅ <b>PAID</b>\n` +
+        `Claim: <b>${claimCode}</b>\n` +
+        `Winner: <b>${winnerLabel}</b>\n` +
+        `Payout: <code>${maskedAddr}</code>\n` +
+        `Token: ${ev.token} (${ev.chain})\n` +
+        `Value: $${Number(ev.usd_value).toFixed(2)}\n` +
+        `TX: ${txUrl}`
+    );
+
+    // Also DM winner (best-effort)
+    try {
+      await sendMessageChecked(
+        Number(claim.tg_user_id),
+        `✅ Payment sent.\n\nClaim: ${claimCode}\nTX: ${txUrl}\n\nThank you for testing DIGDUG.DO.`
+      );
+    } catch {
+      // ignore DM failure
+    }
+
+    return NextResponse.json({ ok: true });
+  }
+
   // /verify (DM only)
   if ((text === "/verify" || text.startsWith("/verify ")) && chat?.type === "private") {
     const tgUserId = fromUser(update)?.id;
@@ -308,7 +484,7 @@ Open the Terminal and type:
     return NextResponse.json({ ok: true });
   }
 
-  // /claim (DM OR GROUP) — public validation in group, secure details via DM
+  // /claim (DM OR GROUP)
   if (text === "/claim" || text.startsWith("/claim ")) {
     const u = fromUser(update);
     const tgUserId = u?.id;
@@ -360,7 +536,6 @@ Step 2: enter the code in the Terminal:
 Then retry:
 <code>/claim ${claimCode}</code>`;
 
-      // Prefer DM (works only if user started bot)
       try {
         await sendMessageChecked(Number(tgUserId), msg);
       } catch {
@@ -395,7 +570,6 @@ Then retry:
       return NextResponse.json({ ok: true });
     }
 
-    // Insert claim (unique per event) — store group_chat_id if claim was made in group
     const { error: insErr } = await supabaseAdmin.from("dd_tg_golden_claims").insert({
       golden_event_id: ev.id,
       tg_user_id: tgUserId,
@@ -414,7 +588,6 @@ Then retry:
       return NextResponse.json({ ok: true });
     }
 
-    // DM the next steps
     const dm = `✅ Claim accepted.
 
 Claim: ${claimCode}
@@ -438,7 +611,7 @@ After payment, you will receive a receipt confirmation.`;
     return NextResponse.json({ ok: true });
   }
 
-  // /usdt (DM only) — store payout address + SAFE public confirmation (masked)
+  // /usdt (DM only)
   if ((text === "/usdt" || text.startsWith("/usdt ")) && chat?.type === "private") {
     const tgUserId = fromUser(update)?.id;
 
@@ -455,7 +628,6 @@ After payment, you will receive a receipt confirmation.`;
       return NextResponse.json({ ok: true });
     }
 
-    // Find latest claim by this TG user
     const { data: claims, error: cErr } = await supabaseAdmin
       .from("dd_tg_golden_claims")
       .select("id, claimed_at, group_chat_id, golden_event_id")
@@ -494,7 +666,6 @@ USDT (BEP-20): ${addr}
 We will pay and then send you a receipt confirmation.`
     );
 
-    // SAFE public confirmation (masked) back to the group where the claim occurred
     if (claim?.group_chat_id) {
       try {
         const who = displayName(update);
@@ -520,6 +691,7 @@ Commands (DM):
 
 Group:
 - /claim GF-XXXX (public validation)
+- /paid GF-XXXX 0xTXHASH (admin)
 - /ping
 - /chatid`
     );
@@ -530,7 +702,7 @@ Group:
   if (text === "/help") {
     await sendMessage(
       chatId,
-      `Commands:\n/verify\n/claim GF-XXXX\n/usdt 0xYOURADDRESS\n\nGroup: /claim GF-XXXX (public validation)\n/ping\n/chatid`
+      `Commands:\n/verify\n/claim GF-XXXX\n/usdt 0xYOURADDRESS\n\nGroup:\n/claim GF-XXXX (public validation)\n/paid GF-XXXX 0xTXHASH (admin)\n/ping\n/chatid`
     );
     return NextResponse.json({ ok: true });
   }
