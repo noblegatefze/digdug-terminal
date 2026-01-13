@@ -270,7 +270,7 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.1.14.0";
+const BUILD_VERSION = "Zero Phase v0.1.14.1";
 
 // local storage keys
 const STORAGE_KEY_PASS = "dd_terminal_pass_v1";
@@ -838,6 +838,18 @@ export default function Page() {
       emit("sys", `Finds: ${finds}`);
       emit("sys", `Find rate: ${rate.toFixed(2)}%`);
       if (rejected > 0) emit("sys", `Rejected digs: ${rejected}`);
+      emit("sys", "");
+
+      // GOLDEN FINDS (from /api/stats/summary)
+      const gToday = Number(data.golden_today ?? 0);
+      const gCap = Number(data.golden_cap ?? 5);
+      const gReset = String(data.golden_reset_in ?? "N/A");
+      const gNext = data.golden_next_allowed_at;
+
+      emit("info", "GOLDEN FINDS");
+      emit("sys", `Golden Finds today: ${gToday}/${gCap}`);
+      emit("sys", `Next allowed: ${gNext ? String(gNext) : "NOW"}`);
+      emit("sys", `UTC reset in: ${gReset}`);
       emit("sys", "");
 
       emit("info", "FUEL");
@@ -1923,7 +1935,6 @@ export default function Page() {
     } catch {
       emit("ok", `${tier} — +${rewardAmt.toFixed(6)} ${sym}`);
     }
-
 
   };
 
