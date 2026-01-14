@@ -8,18 +8,34 @@ function reqEnv(name: string) {
 
 const ADMIN_KEY = reqEnv("ADMIN_API_KEY");
 
-function fmtNextAllowed(nextAllowedAt: any): string {
-  if (!nextAllowedAt) return "NOW";
+function goldenWindowLabel(p: { today: number; cap: number; nextAllowedAt: any }) {
+  const { today, cap, nextAllowedAt } = p;
+
+  if (today >= cap) {
+    return { window: "CLOSED", next: "UTC reset" };
+  }
+
+  if (!nextAllowedAt) {
+    return { window: "OPEN", next: "Any moment" };
+  }
+
   const t = new Date(String(nextAllowedAt)).getTime();
-  if (!Number.isFinite(t)) return "N/A";
+  if (!Number.isFinite(t)) {
+    return { window: "UNKNOWN", next: "N/A" };
+  }
+
   const now = Date.now();
-  if (t <= now) return "NOW";
+  if (t <= now) {
+    return { window: "OPEN", next: "Any moment" };
+  }
+
   const mins = Math.ceil((t - now) / 60000);
-  if (mins <= 1) return "NOW";
-  if (mins < 60) return `in ${mins}m`;
-  const hrs = Math.floor(mins / 60);
-  const rem = mins % 60;
-  return `in ${hrs}h ${rem}m`;
+
+  // Intentionally vague (don’t train users to wait for a specific time)
+  if (mins <= 10) return { window: "LOCKED", next: "Very soon" };
+  if (mins <= 60) return { window: "LOCKED", next: "Soon" };
+  if (mins <= 180) return { window: "LOCKED", next: "Later" };
+  return { window: "LOCKED", next: "Later today" };
 }
 
 function asciiGstatsMessage(data: any) {
@@ -62,9 +78,12 @@ function asciiGstatsMessage(data: any) {
   lines.push("");
 
   // ✅ Golden section
+  const g = goldenWindowLabel({ today: goldenToday, cap: goldenCap, nextAllowedAt: goldenNextAllowedAt });
+  
   lines.push("GOLDEN FINDS");
   lines.push(`- Today: ${goldenToday}/${goldenCap}`);
-  lines.push(`- Next allowed: ${fmtNextAllowed(goldenNextAllowedAt)}`);
+  lines.push(`- Window: ${g.window}`);
+  lines.push(`- Next window: ${g.next}`);
   lines.push(`- UTC reset in: ${goldenResetIn}`);
   lines.push("");
 
