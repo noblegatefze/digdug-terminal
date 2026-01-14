@@ -270,16 +270,16 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.1.14.8";
+const BUILD_VERSION = "Zero Phase v0.1.14.9";
 
 // local storage keys
 const STORAGE_KEY_PASS = "dd_terminal_pass_v1";
 const STORAGE_KEY_USERS = "dd_terminal_users_v1";
 const STORAGE_KEY_ALLOC_LAST_AT = "dd_usddd_alloc_last_at_v1";
+const STORAGE_KEY_FUEL_V1 = "dd_fuel_state_v1";
 
 // acquired USDDD lifetime totals (per Terminal Pass, device-local)
 const STORAGE_KEY_ACQUIRED_TOTAL_V1 = "dd_usddd_acquired_total_v1";
-
 
 // wallets
 const STORAGE_KEY_WALLETS_V2 = "dd_wallets_mock_v2";
@@ -468,6 +468,54 @@ function loadAcquiredTotals(): AcquiredTotals {
     return {};
   }
 }
+
+// fuel persistence (Phase Zero, device-local)
+type FuelState = {
+  allocated: number;
+  acquired: number;
+  treasury: number;
+};
+
+function loadFuelState(username: string | null): FuelState | null {
+  if (!username) return null;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_FUEL_V1);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as Record<string, FuelState>;
+    const s = parsed?.[username];
+    if (!s) return null;
+
+    const allocated = Number(s.allocated);
+    const acquired = Number(s.acquired);
+    const treasury = Number(s.treasury);
+
+    if (
+      !Number.isFinite(allocated) ||
+      !Number.isFinite(acquired) ||
+      !Number.isFinite(treasury)
+    ) {
+      return null;
+    }
+
+    return { allocated, acquired, treasury };
+  } catch {
+    return null;
+  }
+}
+
+function saveFuelState(username: string | null, state: FuelState) {
+  if (!username) return;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_FUEL_V1);
+    const parsed = raw ? (JSON.parse(raw) as Record<string, FuelState>) : {};
+    parsed[username] = state;
+    localStorage.setItem(STORAGE_KEY_FUEL_V1, JSON.stringify(parsed));
+  } catch {
+    // ignore
+  }
+}
+
 function saveAcquiredTotals(m: AcquiredTotals) {
   try {
     localStorage.setItem(STORAGE_KEY_ACQUIRED_TOTAL_V1, JSON.stringify(m));
@@ -1058,11 +1106,35 @@ export default function Page() {
   const authedUser = terminalPass?.username ?? null;
   const twoFaEnabled = terminalPass?.twoFaEnabled ?? false;
 
+  // load persisted fuel when user becomes active
+  useEffect(() => {
+    if (!passLoaded) return;
+    if (!authedUser) return;
+
+    const s = loadFuelState(authedUser);
+    if (!s) return;
+
+    setUsdddAllocated(s.allocated);
+    setUsdddAcquired(s.acquired);
+    setTreasuryUSDDD(s.treasury);
+  }, [passLoaded, authedUser]);
 
   // acquired total is per Terminal Pass (device-local)
   useEffect(() => {
     setAcquiredTotal(getAcquiredTotalForUser(authedUser));
   }, [authedUser]);
+
+  // persist fuel state (Phase Zero anti-refresh exploit)
+  useEffect(() => {
+    if (!passLoaded) return;
+    if (!authedUser) return;
+
+    saveFuelState(authedUser, {
+      allocated: usdddAllocated,
+      acquired: usdddAcquired,
+      treasury: treasuryUSDDD,
+    });
+  }, [passLoaded, authedUser, usdddAllocated, usdddAcquired, treasuryUSDDD]);
 
   // scroll
   useEffect(() => {
