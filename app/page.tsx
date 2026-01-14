@@ -270,13 +270,14 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.1.14.9";
+const BUILD_VERSION = "Zero Phase v0.1.14.10";
 
 // local storage keys
 const STORAGE_KEY_PASS = "dd_terminal_pass_v1";
 const STORAGE_KEY_USERS = "dd_terminal_users_v1";
 const STORAGE_KEY_ALLOC_LAST_AT = "dd_usddd_alloc_last_at_v1";
 const STORAGE_KEY_FUEL_V1 = "dd_fuel_state_v1";
+const STORAGE_KEY_CAMPAIGNS_V1 = "dd_campaigns_v1";
 
 // acquired USDDD lifetime totals (per Terminal Pass, device-local)
 const STORAGE_KEY_ACQUIRED_TOTAL_V1 = "dd_usddd_acquired_total_v1";
@@ -516,6 +517,27 @@ function saveFuelState(username: string | null, state: FuelState) {
   }
 }
 
+// campaigns persistence (Phase Zero, device-local)
+function loadCampaigns(): Campaign[] | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_CAMPAIGNS_V1);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    return parsed as Campaign[];
+  } catch {
+    return null;
+  }
+}
+
+function saveCampaigns(list: Campaign[]) {
+  try {
+    localStorage.setItem(STORAGE_KEY_CAMPAIGNS_V1, JSON.stringify(list));
+  } catch {
+    // ignore
+  }
+}
+
 function saveAcquiredTotals(m: AcquiredTotals) {
   try {
     localStorage.setItem(STORAGE_KEY_ACQUIRED_TOTAL_V1, JSON.stringify(m));
@@ -538,7 +560,6 @@ function addAcquiredForUser(username: string, amt: number) {
   saveAcquiredTotals(m);
   return next;
 }
-
 
 function seedSponsorCampaigns(): Campaign[] {
   const mk = (id: string, chainId: ChainId, sym: string, cost: number, cooldown: number, balance: number): Campaign => ({
@@ -1071,6 +1092,28 @@ export default function Page() {
       // ignore
     }
   }, [passLoaded]);
+
+  // load persisted campaigns (boxes) on startup; fallback to seeded
+  useEffect(() => {
+    if (!passLoaded) return;
+
+    const saved = loadCampaigns();
+    if (saved && saved.length > 0) {
+      setCampaigns(saved);
+      return;
+    }
+
+    // first run: persist the seeded set so refresh keeps box state
+    const seeded = seedSponsorCampaigns();
+    setCampaigns(seeded);
+    saveCampaigns(seeded);
+  }, [passLoaded]);
+
+  // persist campaigns (boxes) whenever they change
+  useEffect(() => {
+    if (!passLoaded) return;
+    saveCampaigns(campaignsRef.current);
+  }, [passLoaded, campaigns]);
 
   useEffect(() => {
     try {
