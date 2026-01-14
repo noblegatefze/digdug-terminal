@@ -270,7 +270,7 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.1.14.7";
+const BUILD_VERSION = "Zero Phase v0.1.14.8";
 
 // local storage keys
 const STORAGE_KEY_PASS = "dd_terminal_pass_v1";
@@ -1748,10 +1748,17 @@ export default function Page() {
     emit("sys", "Summary:");
     emit("sys", `• Chain: ${chainLabel(c.deployChainId)}`);
     emit("sys", `• Cost: ${c.costUSDDD} USDDD (fuel)`);
+
+    // NEW — user fuel context
+    emit("sys", `• Your fuel: ${usdddTotalRef.current.toFixed(2)} USDDD`);
+
     emit("sys", `• Reward: ${c.rewardMode}`);
     emit("sys", `• Limit: ${limitLabel(c)}`);
     emit("sys", `• Cooldown: ${cooldownLabel(c)}`);
-    emit("sys", `• Available: ${availableBalance(c).toFixed(6)} ${sym}`);
+
+    // NEW — box remaining (already existed but we keep it prominent)
+    emit("sys", `• Box remaining: ${availableBalance(c).toFixed(6)} ${sym}`);
+
     emit("sys", `• Token price: ${priceStr} (informational)`);
 
     // gate preview (no spending yet)
@@ -1983,6 +1990,9 @@ export default function Page() {
     } catch {
       emit("ok", `${tier} — +${rewardAmt.toFixed(6)} ${sym}`);
     }
+
+    emit("sys", `Fuel remaining: ${usdddTotalRef.current.toFixed(2)} USDDD`);
+    emit("sys", `Box remaining: ${availableBalance(campaign).toFixed(6)} ${sym}`);
 
   };
 
