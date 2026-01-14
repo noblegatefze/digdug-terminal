@@ -270,7 +270,7 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.1.14.4";
+const BUILD_VERSION = "Zero Phase v0.1.14.5";
 
 // local storage keys
 const STORAGE_KEY_PASS = "dd_terminal_pass_v1";
@@ -1849,12 +1849,11 @@ export default function Page() {
           const nextAt = s.golden_next_allowed_at ? new Date(String(s.golden_next_allowed_at)).getTime() : null;
 
           if (gToday >= gCap) {
-            emit("sys", "Golden Find window: CLOSED (daily cap reached)");
+            emit("sys", "Golden Find: all finds discovered for today. Try again after reset.");
           } else if (nextAt && nextAt > Date.now()) {
-            const mins = Math.ceil((nextAt - Date.now()) / 60000);
-            emit("sys", `Golden Find window: locked (next possible in ~${mins}m)`);
+            emit("sys", "Golden Find: so close… try again.");
           } else {
-            emit("sys", "Golden Find window: OPEN");
+            emit("sys", "Golden Find: so close… any second now.");
           }
         }
       }
