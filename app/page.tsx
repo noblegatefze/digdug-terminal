@@ -270,7 +270,7 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.1.14.10";
+const BUILD_VERSION = "Zero Phase v0.1.14.11";
 
 // local storage keys
 const STORAGE_KEY_PASS = "dd_terminal_pass_v1";
@@ -1989,6 +1989,7 @@ export default function Page() {
       // silent — stats UX should never block a dig
     }
 
+    const boxBefore = availableBalance(campaign);
     const rewardAmt = computeReward(campaign);
     const sym = campaign.tokenSymbol ?? "TOKEN";
     const tier = findTier(campaign, rewardAmt);
@@ -2107,7 +2108,8 @@ export default function Page() {
     }
 
     emit("sys", `Fuel remaining: ${usdddTotalRef.current.toFixed(2)} USDDD`);
-    emit("sys", `Box remaining: ${availableBalance(campaign).toFixed(6)} ${sym}`);
+    const boxAfter = Math.max(0, boxBefore - rewardAmt);
+    emit("sys", `Box remaining: ${boxAfter.toFixed(6)} ${sym}`);
 
   };
 
