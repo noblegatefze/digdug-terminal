@@ -270,7 +270,7 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.1.14.2";
+const BUILD_VERSION = "Zero Phase v0.1.14.3";
 
 // local storage keys
 const STORAGE_KEY_PASS = "dd_terminal_pass_v1";
@@ -1933,7 +1933,7 @@ export default function Page() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          usd_value: usdValue,            // numeric
+          usd_value: 5 + Math.random() * 15,  // Golden Find attempt value ($5–$20)
           token: sym,                     // token symbol
           chain: campaign.deployChainId,  // ETH/BNB/SOL/ARB/BASE
           username: authedUser,
