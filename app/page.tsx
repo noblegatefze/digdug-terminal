@@ -270,7 +270,7 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.1.14.5";
+const BUILD_VERSION = "Zero Phase v0.1.14.6";
 
 // local storage keys
 const STORAGE_KEY_PASS = "dd_terminal_pass_v1";
@@ -526,6 +526,12 @@ function seedSponsorCampaigns(): Campaign[] {
     mk("meme", "SOL", "MEME", 0.75, 3, 25000),
     mk("enrg", "BASE", "ENRG", 1.5, 24, 65000),
     mk("cake", "BNB", "CAKE", 0.6, 8, 80000),
+    // new 5 (high-activity / short cooldowns)
+    mk("toast", "BASE", "TOAST", 0.35, 0.25, 120000), // 15 min
+    mk("crumbs", "SOL", "CRUMBS", 0.25, 0.5, 90000),  // 30 min
+    mk("dug", "ETH", "DUG", 0.5, 0.75, 150000), // 45 min
+    mk("gem", "ARB", "GEM", 0.4, 0.5, 110000), // 30 min
+    mk("spark", "BNB", "SPARK", 0.3, 1, 130000), // 60 min
   ];
 
   // seed some sponsor metadata for DD testing (leave others blank)
