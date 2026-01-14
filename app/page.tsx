@@ -270,7 +270,7 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.1.14.3";
+const BUILD_VERSION = "Zero Phase v0.1.14.4";
 
 // local storage keys
 const STORAGE_KEY_PASS = "dd_terminal_pass_v1";
@@ -844,11 +844,30 @@ export default function Page() {
       const gToday = Number(data.golden_today ?? 0);
       const gCap = Number(data.golden_cap ?? 5);
       const gReset = String(data.golden_reset_in ?? "N/A");
-      const gNext = data.golden_next_allowed_at;
+      const gNextRaw = data.golden_next_allowed_at;
+
+      let windowLabel = "OPEN";
+      let nextLabel = "Any moment";
+
+      if (gToday >= gCap) {
+        windowLabel = "CLOSED";
+        nextLabel = "UTC reset";
+      } else if (gNextRaw) {
+        const t = new Date(String(gNextRaw)).getTime();
+        if (Number.isFinite(t) && t > Date.now()) {
+          windowLabel = "LOCKED";
+          const mins = Math.ceil((t - Date.now()) / 60000);
+          if (mins <= 10) nextLabel = "Very soon";
+          else if (mins <= 60) nextLabel = "Soon";
+          else if (mins <= 180) nextLabel = "Later";
+          else nextLabel = "Later today";
+        }
+      }
 
       emit("info", "GOLDEN FINDS");
       emit("sys", `Golden Finds today: ${gToday}/${gCap}`);
-      emit("sys", `Next allowed: ${gNext ? String(gNext) : "NOW"}`);
+      emit("sys", `Window: ${windowLabel}`);
+      emit("sys", `Next window: ${nextLabel}`);
       emit("sys", `UTC reset in: ${gReset}`);
       emit("sys", "");
 
