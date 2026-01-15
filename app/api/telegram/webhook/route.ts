@@ -421,12 +421,12 @@ export async function POST(req: NextRequest) {
     await sendMessage(
       chatId,
       `✅ <b>PAID</b>\n` +
-        `Claim: <b>${claimCode}</b>\n` +
-        `Winner: <b>${winnerLabel}</b>\n` +
-        `Payout: <code>${maskedAddr}</code>\n` +
-        `Token: ${ev.token} (${ev.chain})\n` +
-        `Value: $${Number(ev.usd_value).toFixed(2)}\n` +
-        `TX: ${txUrl}`
+      `Claim: <b>${claimCode}</b>\n` +
+      `Winner: <b>${winnerLabel}</b>\n` +
+      `Payout: <code>${maskedAddr}</code>\n` +
+      `Token: ${ev.token} (${ev.chain})\n` +
+      `Value: $${Number(ev.usd_value).toFixed(2)}\n` +
+      `TX: ${txUrl}`
     );
 
     // Also DM winner (best-effort)
@@ -580,9 +580,23 @@ Then retry:
     if (insErr) {
       const m = String((insErr as any)?.message ?? "").toLowerCase();
       if (m.includes("duplicate") || m.includes("unique")) {
-        await sendMessage(chatId, `ℹ️ ${who}: already claimed.`);
+        // If claim was created via DM first, group_chat_id may be NULL.
+        // When user runs /claim in the group, backfill group_chat_id so follow-up posts work.
+        if (isGroup) {
+          const { error: fixErr } = await supabaseAdmin
+            .from("dd_tg_golden_claims")
+            .update({ group_chat_id: String(chatId) })
+            .eq("golden_event_id", ev.id)
+            .eq("tg_user_id", tgUserId)
+            .is("group_chat_id", null);
+
+          if (fixErr) console.error("[claim] group_chat_id backfill failed:", fixErr);
+        }
+
+        await sendMessage(chatId, `ℹ️ ${who}: already claimed. Check DM for payout step.`);
         return NextResponse.json({ ok: true });
       }
+
       console.error("[claim] insert failed:", insErr);
       await sendMessage(chatId, `❌ ${who}: claim failed (server error).`);
       return NextResponse.json({ ok: true });
