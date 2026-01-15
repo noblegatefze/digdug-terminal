@@ -270,7 +270,7 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.1.14.11";
+const BUILD_VERSION = "Zero Phase v0.1.14.12";
 
 // local storage keys
 const STORAGE_KEY_PASS = "dd_terminal_pass_v1";
@@ -1961,10 +1961,45 @@ export default function Page() {
   };
 
   const performDig = async (campaign: Campaign) => {
-    emit("sys", "dig: connecting...");
-    emit("sys", "dig: verifying box...");
-    emit("sys", "dig: generating entropy...");
-    emit("sys", "[##########] 100%");
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    let isGoldenActive = false;
+    try {
+      const r = await fetch("/api/stats/summary", { method: "GET" });
+      if (r.ok) {
+        const s = await r.json().catch(() => null);
+        if (s) {
+          const gToday = Number(s.golden_today ?? 0);
+          const gCap = Number(s.golden_cap ?? 5);
+          const nextAt = s.golden_next_allowed_at ? new Date(String(s.golden_next_allowed_at)).getTime() : null;
+
+          // active if not capped and not locked by nextAt
+          isGoldenActive = gToday < gCap && (!nextAt || nextAt <= Date.now());
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    const totalMs = (isGoldenActive ? 18000 : 12000) + Math.floor(Math.random() * 7000); // 12–25s
+
+    const steps = [
+      { label: "dig: connecting…", pct: 12, ms: Math.floor(totalMs * 0.22) },
+      { label: "dig: verifying box…", pct: 40, ms: Math.floor(totalMs * 0.28) },
+      { label: "dig: entropy accumulation…", pct: 78, ms: Math.floor(totalMs * 0.35) },
+      { label: "dig: finalizing…", pct: 100, ms: Math.floor(totalMs * 0.15) },
+    ];
+
+    const bar = (pct: number) => {
+      const blocks = 10;
+      const filled = Math.max(0, Math.min(blocks, Math.round((pct / 100) * blocks)));
+      return `[${"#".repeat(filled)}${"-".repeat(blocks - filled)}] ${pct}%`;
+    };
+
+    for (const s of steps) {
+      emit("sys", s.label);
+      emit("sys", bar(s.pct));
+      await sleep(s.ms);
+    }
 
     // Golden Find window status (read-only UX)
     try {
