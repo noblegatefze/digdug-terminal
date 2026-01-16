@@ -1,6 +1,10 @@
 import OpenAI from "openai";
 import { loadDocs } from "./docs";
-import { BUILD_INFO } from "../build";
+
+const BUILD_INFO = {
+  version: "v0.1.15.0",
+  commit: process.env.VERCEL_GIT_COMMIT_SHA || "local",
+};
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
@@ -10,8 +14,12 @@ export async function askBrain(question: string) {
   const docs = loadDocs();
 
   const context = docs
-    .map(d => `SOURCE: ${d.path}\n${d.text}`)
     .slice(0, 6)
+    .map(
+      d =>
+        `SOURCE: ${d.path}
+${d.text}`
+    )
     .join("\n\n");
 
   const prompt = `
@@ -22,6 +30,7 @@ Rules:
 - If something is not defined, say: "Not specified in canonical DIGDUG docs."
 - Separate DIGDUG protocol facts from general crypto knowledge.
 - Cite sources by path.
+- Be concise.
 
 Build: ${BUILD_INFO.version} (${BUILD_INFO.commit})
 
@@ -32,13 +41,13 @@ Question:
 ${question}
 `;
 
-  const res = await client.responses.create({
+  const response = await client.responses.create({
     model: "gpt-5-mini",
     input: prompt,
   });
 
   return {
-    answer: res.output_text,
+    answer: response.output_text,
     build: BUILD_INFO,
   };
 }
