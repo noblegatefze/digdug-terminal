@@ -270,7 +270,7 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.1.14.12";
+const BUILD_VERSION = "Zero Phase v0.1.15.0";
 
 // local storage keys
 const STORAGE_KEY_PASS = "dd_terminal_pass_v1";
@@ -1736,17 +1736,19 @@ export default function Page() {
       emit("sys", `${C("withdraw")}   ${C("wallet")}`);
       emit("sys", `${C("help")}       ${C("commands")}`);
       emit("sys", `${C("docs")}       ${C("gstats")}`);
+      emit("sys", `${C("ask")}        Ask DIGDUG Brain`);
       return;
     }
 
     if (m === "SPONSOR") {
       emit("info", "SPONSOR COMMANDS");
       emit("sys", "");
-      emit("sys", `${C("create box")}   ${C("boxes")}`);
-      emit("sys", `${C("activate")}     ${C("configure")}`);
-      emit("sys", `${C("fund box")}     ${C("wallet")}`);
-      emit("sys", `${C("help")}         ${C("commands")}`);
-      emit("sys", `${C("docs")}         ${C("gstats")}`);
+      emit("sys", `${C("create box")}  ${C("boxes")}`);
+      emit("sys", `${C("activate")}    ${C("configure")}`);
+      emit("sys", `${C("fund box")}    ${C("wallet")}`);
+      emit("sys", `${C("help")}        ${C("commands")}`);
+      emit("sys", `${C("docs")}        ${C("gstats")}`);
+      emit("sys", `${C("ask")}         Ask DIGDUG Brain`);
       return;
     }
 
@@ -2695,6 +2697,50 @@ export default function Page() {
     if (low === "docs") return void doDocs();
     if (low === "build") return void emit("sys", `BUILD: ${BUILD_VERSION}`);
     if (low === "gstats") return void fetchAndPrintGlobalPulse();
+
+    // AI Brain (/ask)
+    if (low === "ask" || low.startsWith("ask ")) {
+      if (low === "ask") {
+        emit("warn", "Missing question.");
+        emit("info", "Usage:");
+        emit("sys", `${C("ask")} how many golden finds per day?`);
+        return;
+      }
+
+      const q = v.slice(4).trim();
+      emit("sys", "DIGDUG Brain: thinking…");
+
+      void (async () => {
+        try {
+          const r = await fetch("/api/ask", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ q }),
+          });
+
+          const data = await r.json().catch(() => null);
+
+          if (!r.ok || !data?.ok) {
+            emit("err", `Brain error (HTTP ${r.status})`);
+            if (data?.error) emit("sys", String(data.error));
+            return;
+          }
+
+          const ans = String(data.answer ?? "").trim();
+          if (!ans) {
+            emit("warn", "Brain returned empty answer.");
+            return;
+          }
+
+          // print answer line-by-line (terminal friendly)
+          ans.split("\n").forEach((line) => emit("info", line));
+        } catch (e: any) {
+          emit("err", `Brain request failed: ${e?.message ?? "Unknown error"}`);
+        }
+      })();
+
+      return;
+    }
 
     // mock price mode (admin/operator)
     if (low.startsWith("price mock")) {
@@ -3778,6 +3824,7 @@ export default function Page() {
         { label: "Security (2FA)", cmd: "2fa" },
         { label: "Help", cmd: "help" },
         { label: "Commands", cmd: "commands" },
+        { label: "Ask (AI Brain)", cmd: "ask how many golden finds per day?" },
       ],
       SPONSOR: sponsorHasBoxes
         ? [
@@ -3797,6 +3844,7 @@ export default function Page() {
           { label: "Wallet", cmd: "wallet" },
           { label: "Help", cmd: "help" },
           { label: "Commands", cmd: "commands" },
+          { label: "Ask (AI Brain)", cmd: "ask how do sponsor boxes work?" },
         ]
         : [
           { label: "Create Box", cmd: "create box" },
@@ -3804,6 +3852,7 @@ export default function Page() {
           { label: "Security (2FA)", cmd: "2fa" },
           { label: "Help", cmd: "help" },
           { label: "Commands", cmd: "commands" },
+          { label: "Ask (AI Brain)", cmd: "ask how do sponsor boxes work?" },
         ],
       ADMIN: [
         { label: "Public Stats", cmd: "stats" },
