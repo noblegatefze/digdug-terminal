@@ -358,10 +358,12 @@ export async function POST(req: NextRequest) {
       let out = String(result.answer || "").trim();
       if (!out) out = "No answer returned.";
 
+      out = out.split("\n").slice(0, 8).join("\n");
+
       // hard cap for Telegram (4096 limit; keep margin)
       if (out.length > 3500) out = out.slice(0, 3500) + "\n…";
 
-      const header = `<b>DIGDUG Brain</b> (v${result.build?.version ?? "?"})\n`;
+      const header = `<b>Digster AI</b> (v${result.build?.version ?? "?"})\n`;
       await sendMessage(chatId, header + escapeHtml(out));
 
       return NextResponse.json({ ok: true });
