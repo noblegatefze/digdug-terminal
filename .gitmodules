@@ -1,0 +1,3 @@
+[submodule "whitepaper"]
+	path = whitepaper
+	url = https://github.com/noblegatefze/digdug-whitepaper
