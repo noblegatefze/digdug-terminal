@@ -2708,7 +2708,7 @@ export default function Page() {
       }
 
       const q = v.slice(4).trim();
-      emit("sys", "DIGDUG Brain: thinking…");
+      emit("sys", "Digster AI: reading docs… (1/3)");
 
       void (async () => {
         try {
@@ -2726,11 +2726,15 @@ export default function Page() {
             return;
           }
 
+          emit("sys", "Digster AI: answering… (2/3)");
+
           const ans = String(data.answer ?? "").trim();
           if (!ans) {
             emit("warn", "Brain returned empty answer.");
             return;
           }
+
+          emit("sys", "Digster AI: done. (3/3)");
 
           // print answer line-by-line (terminal friendly)
           ans.split("\n").forEach((line) => emit("info", line));
