@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { askBrain } from "@/lib/brain/answer";
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN!;
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
@@ -259,6 +260,13 @@ async function lookupTgUserLabel(tgUserId: number): Promise<string> {
   return `TG:${tgUserId}`;
 }
 
+function escapeHtml(s: string) {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 export async function GET() {
   return new Response("Telegram webhook OK", { status: 200 });
 }
@@ -321,6 +329,48 @@ export async function POST(req: NextRequest) {
   }
 
   if (!chatId) return NextResponse.json({ ok: true });
+
+  // /ask (GROUP preferred)
+  if (text === "/ask" || text.startsWith("/ask ") || text.startsWith("/ask@")) {
+    const isGroup = chat?.type === "group" || chat?.type === "supergroup";
+
+    // allow "/ask@DigsterBot ..." format
+    const firstSpace = text.indexOf(" ");
+    const qRaw = firstSpace >= 0 ? text.slice(firstSpace + 1).trim() : "";
+
+    if (!qRaw) {
+      await sendMessage(chatId, "Usage: /ask your question");
+      return NextResponse.json({ ok: true });
+    }
+
+    // If you want it GROUP-only, uncomment this:
+    // if (!isGroup) {
+    //   await sendMessage(chatId, "Please use /ask in the main group: https://t.me/digdugdo");
+    //   return NextResponse.json({ ok: true });
+    // }
+
+    try {
+      // Force Telegram-friendly brevity via a lightweight directive
+      const q = `${qRaw}\n\n(Answer for Telegram: max 8 short lines. Keep it punchy. Include up to 2 source paths.)`;
+
+      const result = await askBrain(q);
+
+      let out = String(result.answer || "").trim();
+      if (!out) out = "No answer returned.";
+
+      // hard cap for Telegram (4096 limit; keep margin)
+      if (out.length > 3500) out = out.slice(0, 3500) + "\n…";
+
+      const header = `<b>DIGDUG Brain</b> (v${result.build?.version ?? "?"})\n`;
+      await sendMessage(chatId, header + escapeHtml(out));
+
+      return NextResponse.json({ ok: true });
+    } catch (e: any) {
+      const msg = e?.message ? String(e.message) : "Unknown error";
+      await sendMessage(chatId, `⚠️ Brain error: ${escapeHtml(msg)}`);
+      return NextResponse.json({ ok: true });
+    }
+  }
 
   // ✅ ADMIN /paid (GROUP ONLY)
   if (text === "/paid" || text.startsWith("/paid ")) {
