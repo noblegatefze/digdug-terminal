@@ -12,7 +12,6 @@ const supabaseAdmin = createClient(reqEnv("SUPABASE_URL"), reqEnv("SUPABASE_SERV
 });
 
 const SITE = process.env.NEXT_PUBLIC_SITE_URL || "https://digdug.do";
-const ADMIN_KEY = reqEnv("ADMIN_API_KEY");
 
 // Golden Find rules (LOCKED)
 const GOLD_MIN = 5;
@@ -87,6 +86,10 @@ function inferBroadcastSent(out: any): boolean {
 }
 
 export async function POST(req: Request) {
+  const ADMIN_KEY = process.env.ADMIN_API_KEY;
+  if (!ADMIN_KEY) {
+    return NextResponse.json({ ok: false, error: "ADMIN_API_KEY not set" }, { status: 500 });
+  }
   const body = await req.json().catch(() => null);
   if (!body) return NextResponse.json({ ok: false, error: "bad_json" }, { status: 400 });
 

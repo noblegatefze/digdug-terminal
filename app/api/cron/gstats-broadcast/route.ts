@@ -6,8 +6,6 @@ function reqEnv(name: string) {
   return v;
 }
 
-const ADMIN_KEY = reqEnv("ADMIN_API_KEY");
-
 function goldenWindowLabel(p: { today: number; cap: number; nextAllowedAt: any }) {
   const { today, cap, nextAllowedAt } = p;
 
@@ -79,7 +77,7 @@ function asciiGstatsMessage(data: any) {
 
   // ✅ Golden section
   const g = goldenWindowLabel({ today: goldenToday, cap: goldenCap, nextAllowedAt: goldenNextAllowedAt });
-  
+
   lines.push("GOLDEN FINDS");
   lines.push(`- Today: ${goldenToday}/${goldenCap}`);
   lines.push(`- Window: ${g.window}`);
@@ -118,6 +116,14 @@ function asciiGstatsMessage(data: any) {
 }
 
 export async function GET() {
+  const ADMIN_KEY = process.env.ADMIN_API_KEY;
+  if (!ADMIN_KEY) {
+    return NextResponse.json(
+      { ok: false, error: "ADMIN_API_KEY not set" },
+      { status: 500 }
+    );
+  }
+
   // 1) Fetch stats from internal endpoint
   const base = process.env.NEXT_PUBLIC_SITE_URL || "https://digdug.do";
 

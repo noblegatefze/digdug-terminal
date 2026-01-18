@@ -6,9 +6,11 @@ const BUILD_INFO = {
   commit: process.env.VERCEL_GIT_COMMIT_SHA || "local",
 };
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
+function getClient() {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw new Error("Missing OPENAI_API_KEY");
+  return new OpenAI({ apiKey: key });
+}
 
 export async function askBrain(question: string) {
   const docs = loadDocs();
@@ -41,7 +43,7 @@ Question:
 ${question}
 `;
 
-  const response = await client.responses.create({
+  const response = await getClient().responses.create({
     model: "gpt-5-mini",
     input: prompt,
   });
