@@ -881,6 +881,30 @@ export default function Page() {
     }
   };
 
+  const gateDigGlobal = async (username: string, boxId: string) => {
+    try {
+      const r = await fetch("/api/boxes/gate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username, box_id: boxId }),
+      });
+
+      const j = (await r.json().catch(() => ({}))) as any;
+
+      if (r.ok && j?.ok === true && j?.allowed === true) {
+        return { allowed: true as const, reason: null as const, nextAllowedAt: j?.nextAllowedAt ?? null };
+      }
+
+      if (j?.allowed === false) {
+        return { allowed: false as const, reason: String(j?.reason ?? "denied"), nextAllowedAt: j?.nextAllowedAt ?? null };
+      }
+
+      return { allowed: null as const, reason: "softfail", nextAllowedAt: null };
+    } catch {
+      return { allowed: null as const, reason: "softfail", nextAllowedAt: null };
+    }
+  };
+
   const fetchAndPrintGlobalPulse = async () => {
     emit("sys", "Fetching global stats...");
     try {
@@ -2188,19 +2212,45 @@ export default function Page() {
       return;
     }
 
-    // dig gate (per Terminal Pass)
+    // dig gate (GLOBAL first; fallback to local Phase Zero gate)
     if (authedUser) {
-      const gate = checkDigGate(authedUser, campaign);
-      if (!gate.ok) {
-        if (gate.reason === "LIMIT") {
-          emit("warn", "DIG LIMIT REACHED");
+      const gg = await gateDigGlobal(authedUser, campaign.id);
+
+      // hard deny from global gate
+      if (gg.allowed === false) {
+        if (gg.reason === "limit") {
+          emit("warn", "DIG LIMIT REACHED (GLOBAL)");
           emit("sys", "This Treasure Box has a per-user dig limit.");
           return;
         }
-        if (gate.reason === "COOLDOWN") {
-          emit("warn", "COOLDOWN ACTIVE");
-          emit("sys", `Try again in ${fmtMs(gate.remainingMs ?? 0)}.`);
+        if (gg.reason === "cooldown") {
+          emit("warn", "COOLDOWN ACTIVE (GLOBAL)");
+          if (gg.nextAllowedAt) {
+            emit("sys", `Next allowed: ${new Date(gg.nextAllowedAt).toLocaleString()}`);
+          } else {
+            emit("sys", "Try again later.");
+          }
           return;
+        }
+
+        emit("warn", "DIG NOT ALLOWED (GLOBAL)");
+        return;
+      }
+
+      // soft-fail (API down etc) => fallback to local gate
+      if (gg.allowed === null) {
+        const gate = checkDigGate(authedUser, campaign);
+        if (!gate.ok) {
+          if (gate.reason === "LIMIT") {
+            emit("warn", "DIG LIMIT REACHED");
+            emit("sys", "This Treasure Box has a per-user dig limit.");
+            return;
+          }
+          if (gate.reason === "COOLDOWN") {
+            emit("warn", "COOLDOWN ACTIVE");
+            emit("sys", `Try again in ${fmtMs(gate.remainingMs ?? 0)}.`);
+            return;
+          }
         }
       }
     }
