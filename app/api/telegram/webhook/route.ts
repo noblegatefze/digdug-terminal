@@ -417,7 +417,7 @@ async function maybeAutoUnrestrictVerified() {
 
     try {
       await sendMessage(groupChatId, `✅ Verified: <a href="tg://user?id=${tgUserId}">member</a>`);
-    } catch {}
+    } catch { }
   }
 }
 
@@ -607,6 +607,16 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const update = await req.json();
 
+  // Priority commands must run inline (Vercel may kill background work)
+  const text = getText(update);
+  const isPriorityCmd = /^\/(paid|claim|verify|usdt|ask|ping|chatid|start|help)(@|\b)/i.test(text);
+
+  if (isPriorityCmd) {
+    await handleUpdate(update);
+    return NextResponse.json({ ok: true });
+  }
+
+  // Everything else can run best-effort in background
   runInBackground(async () => {
     await handleUpdate(update);
   });
@@ -832,17 +842,17 @@ async function handleUpdate(update: any) {
     await sendMessage(
       chatId,
       `✅ <b>PAID</b>\n` +
-        `Claim: <b>${claimCode}</b>\n` +
-        `Winner: <b>${winnerLabel}</b>\n` +
-        `Payout: <code>${maskedAddr}</code>\n` +
-        `Token: ${ev.token} (${ev.chain})\n` +
-        `Value: $${Number(ev.usd_value).toFixed(2)}\n` +
-        `TX: ${txUrl}`
+      `Claim: <b>${claimCode}</b>\n` +
+      `Winner: <b>${winnerLabel}</b>\n` +
+      `Payout: <code>${maskedAddr}</code>\n` +
+      `Token: ${ev.token} (${ev.chain})\n` +
+      `Value: $${Number(ev.usd_value).toFixed(2)}\n` +
+      `TX: ${txUrl}`
     );
 
     try {
       await sendMessageChecked(Number(claim.tg_user_id), `✅ Payment sent.\n\nClaim: ${claimCode}\nTX: ${txUrl}\n\nThank you for testing DIGDUG.DO.`);
-    } catch {}
+    } catch { }
 
     return;
   }
