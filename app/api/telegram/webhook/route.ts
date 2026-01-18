@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { askBrain } from "@/lib/brain/answer";
 
+function runInBackground(fn: () => Promise<void>) {
+  fn().catch((e) => console.error("[tg] background error:", e));
+}
+
 const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN!;
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 
@@ -354,7 +358,6 @@ async function maybeEnforceGraceExpiry() {
 
     await kickMember(groupChatId, tgUserId, "grace_expired");
 
-    // Mark as removed; reuse reminded_at as a processed marker (so reminder sweep won't touch it)
     const { error: uErr } = await supabaseAdmin
       .from("dd_tg_pending_joins")
       .update({ status: "REMOVED", reminded_at: new Date().toISOString() })
@@ -362,9 +365,6 @@ async function maybeEnforceGraceExpiry() {
       .eq("tg_user_id", tgUserId);
 
     if (uErr) console.error("[tg] expiry update failed:", uErr);
-
-    // Optional: announce removal (keep it quiet)
-    // await sendMessage(groupChatId, `⛔ Removed <a href="tg://user?id=${tgUserId}">user</a> (not verified).`);
   }
 }
 
@@ -415,7 +415,6 @@ async function maybeAutoUnrestrictVerified() {
 
     if (uErr) console.error("[tg] verified update failed:", uErr);
 
-    // Minimal confirmation (optional)
     try {
       await sendMessage(groupChatId, `✅ Verified: <a href="tg://user?id=${tgUserId}">member</a>`);
     } catch {}
@@ -460,12 +459,7 @@ function escapeHtml(s: string) {
 
 /** --- Moderation heuristics (simple + effective) --- */
 
-const ALLOWLIST_DOMAINS = [
-  "digdug.do",
-  "t.me/digsterbot",
-  "t.me/digdugdo",
-  "bscscan.com/tx/",
-];
+const ALLOWLIST_DOMAINS = ["digdug.do", "t.me/digsterbot", "t.me/digdugdo", "bscscan.com/tx/"];
 
 function containsLink(text: string, msg: any): boolean {
   const t = text || "";
@@ -606,9 +600,21 @@ export async function GET() {
   return new Response("Telegram webhook OK", { status: 200 });
 }
 
+/**
+ * IMPORTANT: ACK FAST.
+ * Telegram expects a quick 200 OK. We do all work in background to avoid timeouts.
+ */
 export async function POST(req: NextRequest) {
   const update = await req.json();
 
+  runInBackground(async () => {
+    await handleUpdate(update);
+  });
+
+  return NextResponse.json({ ok: true });
+}
+
+async function handleUpdate(update: any) {
   // Persist chat metadata on ANY update
   const chatAny: TgChat | undefined =
     update?.message?.chat ??
@@ -641,10 +647,10 @@ export async function POST(req: NextRequest) {
 
   if (cmChat?.id && (cmChat?.type === "group" || cmChat?.type === "supergroup") && cmUser?.id && cmStatus === "member") {
     await processJoin(Number(cmChat.id), cmUser, "chat_member");
-    return NextResponse.json({ ok: true });
+    return;
   }
 
-  if (!chatId) return NextResponse.json({ ok: true });
+  if (!chatId) return;
 
   /** --- Group anti-spam/moderation (runs before commands) --- */
   const msg = getMsg(update);
@@ -661,11 +667,7 @@ export async function POST(req: NextRequest) {
       for (const m of newMembers) {
         await processJoin(chatId, m, "new_chat_members");
       }
-
-      // Optional: delete the system join message to reduce spam noise
-      // await deleteMessage(chatId, Number(msg.message_id));
-
-      return NextResponse.json({ ok: true });
+      return;
     }
 
     // Basic spam filter (ignore admin + allowlisted commands)
@@ -683,14 +685,14 @@ export async function POST(req: NextRequest) {
       if (!verified && (pending || true) && hasLink && !allowlistedLink(t)) {
         await deleteMessage(chatId, Number(msg.message_id));
         await banMember(chatId, tgUserId, "unverified_link");
-        return NextResponse.json({ ok: true });
+        return;
       }
 
       // Scammy content + link => delete + ban
       if ((hasLink && scam) && !allowlistedLink(t)) {
         await deleteMessage(chatId, Number(msg.message_id));
         await banMember(chatId, tgUserId, "scam_link");
-        return NextResponse.json({ ok: true });
+        return;
       }
 
       // Verified users: links are allowed only if allowlisted; otherwise delete + warn
@@ -698,12 +700,12 @@ export async function POST(req: NextRequest) {
         await deleteMessage(chatId, Number(msg.message_id));
         const who = mentionUserHtml(tgUserId, displayName(update));
         await sendMessage(chatId, `⚠️ ${who} links are restricted here. Use DIGDUG.DO links only.`);
-        return NextResponse.json({ ok: true });
+        return;
       }
     }
   }
 
-  /** --- Existing command handlers below (mostly unchanged) --- */
+  /** --- Existing command handlers below (unchanged) --- */
 
   // /ask
   if (text === "/ask" || text.startsWith("/ask ") || text.startsWith("/ask@")) {
@@ -712,7 +714,7 @@ export async function POST(req: NextRequest) {
 
     if (!qRaw) {
       await sendMessage(chatId, "Usage: /ask your question");
-      return NextResponse.json({ ok: true });
+      return;
     }
 
     try {
@@ -727,12 +729,11 @@ export async function POST(req: NextRequest) {
 
       const header = `<b>Digster AI</b> (v${result.build?.version ?? "?"})\n`;
       await sendMessage(chatId, header + escapeHtml(out));
-
-      return NextResponse.json({ ok: true });
+      return;
     } catch (e: any) {
       const msg = e?.message ? String(e.message) : "Unknown error";
       await sendMessage(chatId, `⚠️ Brain error: ${escapeHtml(msg)}`);
-      return NextResponse.json({ ok: true });
+      return;
     }
   }
 
@@ -745,12 +746,12 @@ export async function POST(req: NextRequest) {
 
     if (!isGroup) {
       await sendMessage(chatId, "Usage: /paid GF-XXXX 0xTXHASH (group only)");
-      return NextResponse.json({ ok: true });
+      return;
     }
 
     if (!tgUserId || !isAdminUser(Number(tgUserId))) {
       await sendMessage(chatId, `❌ ${who}: unauthorized.`);
-      return NextResponse.json({ ok: true });
+      return;
     }
 
     const parts = text.split(/\s+/).filter(Boolean);
@@ -759,17 +760,17 @@ export async function POST(req: NextRequest) {
 
     if (!claimCode.startsWith("GF-")) {
       await sendMessage(chatId, "Usage: /paid GF-XXXX 0xTXHASH");
-      return NextResponse.json({ ok: true });
+      return;
     }
     if (!txIn || !looksLikeTxHash(txIn)) {
       await sendMessage(chatId, "Usage: /paid GF-XXXX 0xTXHASH (or bscscan link)");
-      return NextResponse.json({ ok: true });
+      return;
     }
 
     const { txHash, txUrl } = extractTxHashOrLink(txIn);
     if (!txHash || !txUrl) {
       await sendMessage(chatId, "Invalid tx hash/link.");
-      return NextResponse.json({ ok: true });
+      return;
     }
 
     const { data: evRows, error: evErr } = await supabaseAdmin
@@ -781,13 +782,13 @@ export async function POST(req: NextRequest) {
     if (evErr) {
       console.error("[paid] event lookup failed:", evErr);
       await sendMessage(chatId, "Server error. Try again.");
-      return NextResponse.json({ ok: true });
+      return;
     }
 
     const ev = (evRows?.[0] as any) ?? null;
     if (!ev?.id) {
       await sendMessage(chatId, `Claim code not found: ${claimCode}`);
-      return NextResponse.json({ ok: true });
+      return;
     }
 
     const { data: claimRows, error: cErr } = await supabaseAdmin
@@ -800,13 +801,13 @@ export async function POST(req: NextRequest) {
     if (cErr) {
       console.error("[paid] claim lookup failed:", cErr);
       await sendMessage(chatId, "Server error. Try again.");
-      return NextResponse.json({ ok: true });
+      return;
     }
 
     const claim = (claimRows?.[0] as any) ?? null;
     if (!claim?.id) {
       await sendMessage(chatId, `No claim found for ${claimCode} (not claimed yet).`);
-      return NextResponse.json({ ok: true });
+      return;
     }
 
     const nowIso = new Date().toISOString();
@@ -822,7 +823,7 @@ export async function POST(req: NextRequest) {
     if (uErr) {
       console.error("[paid] update failed:", uErr);
       await sendMessage(chatId, "Could not mark as paid (server error).");
-      return NextResponse.json({ ok: true });
+      return;
     }
 
     const winnerLabel = await lookupTgUserLabel(Number(claim.tg_user_id));
@@ -843,7 +844,7 @@ export async function POST(req: NextRequest) {
       await sendMessageChecked(Number(claim.tg_user_id), `✅ Payment sent.\n\nClaim: ${claimCode}\nTX: ${txUrl}\n\nThank you for testing DIGDUG.DO.`);
     } catch {}
 
-    return NextResponse.json({ ok: true });
+    return;
   }
 
   // /verify (DM only)
@@ -852,7 +853,7 @@ export async function POST(req: NextRequest) {
 
     if (!tgUserId) {
       await sendMessage(chatId, "Unable to identify your Telegram user.");
-      return NextResponse.json({ ok: true });
+      return;
     }
 
     const code = generateVerifyCode();
@@ -867,7 +868,7 @@ export async function POST(req: NextRequest) {
     if (error) {
       console.error("[verify] insert failed:", error);
       await sendMessage(chatId, "Failed to generate verification code. Try again.");
-      return NextResponse.json({ ok: true });
+      return;
     }
 
     await sendMessage(
@@ -885,7 +886,7 @@ Open the Terminal and type:
 <code>verify ${code}</code>`
     );
 
-    return NextResponse.json({ ok: true });
+    return;
   }
 
   // /claim (DM OR GROUP)
@@ -897,7 +898,7 @@ Open the Terminal and type:
 
     if (!tgUserId) {
       await sendMessage(chatId, "Unable to identify your Telegram user.");
-      return NextResponse.json({ ok: true });
+      return;
     }
 
     const parts = text.split(/\s+/).filter(Boolean);
@@ -905,7 +906,7 @@ Open the Terminal and type:
 
     if (!claimCode || !claimCode.startsWith("GF-")) {
       await sendMessage(chatId, "Usage: /claim GF-XXXX");
-      return NextResponse.json({ ok: true });
+      return;
     }
 
     if (isGroup) {
@@ -924,7 +925,7 @@ Open the Terminal and type:
       console.error("[claim] verify lookup failed:", linkErr);
       if (isGroup) await sendMessage(chatId, `❌ ${who}: claim failed (server error).`);
       else await sendMessage(chatId, "Claim failed (server error). Try again later.");
-      return NextResponse.json({ ok: true });
+      return;
     }
 
     const terminalUserId = (links?.[0] as any)?.terminal_user_id;
@@ -945,7 +946,7 @@ Then retry:
         await sendMessage(chatId, `⚠️ ${who}: you must verify first. DM @DigsterBot and run <code>/verify</code>.`);
       }
 
-      return NextResponse.json({ ok: true });
+      return;
     }
 
     const { data: evRows, error: evErr } = await supabaseAdmin
@@ -957,18 +958,18 @@ Then retry:
     if (evErr) {
       console.error("[claim] event lookup failed:", evErr);
       await sendMessage(chatId, `❌ ${who}: claim failed (server error).`);
-      return NextResponse.json({ ok: true });
+      return;
     }
 
     const ev = evRows?.[0] as any;
     if (!ev?.id) {
       await sendMessage(chatId, `❌ ${who}: claim code not found.`);
-      return NextResponse.json({ ok: true });
+      return;
     }
 
     if (String(ev.terminal_user_id) !== String(terminalUserId)) {
       await sendMessage(chatId, `❌ ${who}: claim rejected (not your verified Terminal Pass).`);
-      return NextResponse.json({ ok: true });
+      return;
     }
 
     const { error: insErr } = await supabaseAdmin.from("dd_tg_golden_claims").insert({
@@ -993,12 +994,12 @@ Then retry:
         }
 
         await sendMessage(chatId, `ℹ️ ${who}: already claimed. Check DM for payout step.`);
-        return NextResponse.json({ ok: true });
+        return;
       }
 
       console.error("[claim] insert failed:", insErr);
       await sendMessage(chatId, `❌ ${who}: claim failed (server error).`);
-      return NextResponse.json({ ok: true });
+      return;
     }
 
     const dm = `✅ Claim accepted.
@@ -1021,7 +1022,7 @@ After payment, you will receive a receipt confirmation.`;
       await sendMessage(chatId, `✅ ${who}: claim validated, but I couldn't DM you. Please DM @DigsterBot and send <code>/start</code>, then try again.`);
     }
 
-    return NextResponse.json({ ok: true });
+    return;
   }
 
   // /usdt (DM only)
@@ -1030,7 +1031,7 @@ After payment, you will receive a receipt confirmation.`;
 
     if (!tgUserId) {
       await sendMessage(chatId, "Unable to identify your Telegram user.");
-      return NextResponse.json({ ok: true });
+      return;
     }
 
     const parts = text.split(/\s+/).filter(Boolean);
@@ -1038,7 +1039,7 @@ After payment, you will receive a receipt confirmation.`;
 
     if (!addr || !looksLikeEvmAddress(addr)) {
       await sendMessage(chatId, "Usage: /usdt 0xYOURADDRESS (USDT BEP-20)");
-      return NextResponse.json({ ok: true });
+      return;
     }
 
     const { data: claims, error: cErr } = await supabaseAdmin
@@ -1051,13 +1052,13 @@ After payment, you will receive a receipt confirmation.`;
     if (cErr) {
       console.error("[usdt] claim lookup failed:", cErr);
       await sendMessage(chatId, "Could not store address (server error). Try again later.");
-      return NextResponse.json({ ok: true });
+      return;
     }
 
     const claim = claims?.[0] as any;
     if (!claim?.id) {
       await sendMessage(chatId, "No recent claim found. Claim a Golden Find first using /claim GF-XXXX.");
-      return NextResponse.json({ ok: true });
+      return;
     }
 
     const { error: uErr } = await supabaseAdmin.from("dd_tg_golden_claims").update({ payout_usdt_bep20: addr }).eq("id", claim.id);
@@ -1065,7 +1066,7 @@ After payment, you will receive a receipt confirmation.`;
     if (uErr) {
       console.error("[usdt] update failed:", uErr);
       await sendMessage(chatId, "Could not store address (server error). Try again later.");
-      return NextResponse.json({ ok: true });
+      return;
     }
 
     const masked = maskEvmAddress(addr);
@@ -1081,7 +1082,7 @@ After payment, you will receive a receipt confirmation.`;
       }
     }
 
-    return NextResponse.json({ ok: true });
+    return;
   }
 
   // /start
@@ -1101,7 +1102,7 @@ Group:
 - /ping
 - /chatid`
     );
-    return NextResponse.json({ ok: true });
+    return;
   }
 
   // /help
@@ -1110,7 +1111,7 @@ Group:
       chatId,
       `Commands:\n/verify\n/claim GF-XXXX\n/usdt 0xYOURADDRESS\n\nGroup:\n/claim GF-XXXX (public validation)\n/paid GF-XXXX 0xTXHASH (admin)\n/ping\n/chatid`
     );
-    return NextResponse.json({ ok: true });
+    return;
   }
 
   // /ping
@@ -1118,7 +1119,7 @@ Group:
     const type = chat?.type ?? "unknown";
     const title = chat?.title ? ` • ${chat.title}` : "";
     await sendMessage(chatId, `Digster online${title}\nchat_type=${type}`);
-    return NextResponse.json({ ok: true });
+    return;
   }
 
   // /chatid
@@ -1126,8 +1127,8 @@ Group:
     const type = chat?.type ?? "unknown";
     const title = chat?.title ? `\ntitle=${chat.title}` : "";
     await sendMessage(chatId, `chat_id=${chatId}\nchat_type=${type}${title}`);
-    return NextResponse.json({ ok: true });
+    return;
   }
 
-  return NextResponse.json({ ok: true });
+  return;
 }
