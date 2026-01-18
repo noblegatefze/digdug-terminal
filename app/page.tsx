@@ -881,7 +881,20 @@ export default function Page() {
     }
   };
 
-  const gateDigGlobal = async (username: string, boxId: string) => {
+  type GateResult =
+    | { allowed: true; reason: null; nextAllowedAt: string | null }
+    | { allowed: false; reason: string; nextAllowedAt: string | null }
+    | { allowed: null; reason: "softfail"; nextAllowedAt: null };
+
+  type GateResult =
+    | { allowed: true; reason: null; nextAllowedAt: string | null }
+    | { allowed: false; reason: string; nextAllowedAt: string | null }
+    | { allowed: null; reason: "softfail"; nextAllowedAt: null };
+
+  const gateDigGlobal = async (
+    username: string,
+    boxId: string
+  ): Promise<GateResult> => {
     try {
       const r = await fetch("/api/boxes/gate", {
         method: "POST",
@@ -892,16 +905,20 @@ export default function Page() {
       const j = (await r.json().catch(() => ({}))) as any;
 
       if (r.ok && j?.ok === true && j?.allowed === true) {
-        return { allowed: true as const, reason: null as const, nextAllowedAt: j?.nextAllowedAt ?? null };
+        return { allowed: true, reason: null, nextAllowedAt: j?.nextAllowedAt ?? null };
       }
 
       if (j?.allowed === false) {
-        return { allowed: false as const, reason: String(j?.reason ?? "denied"), nextAllowedAt: j?.nextAllowedAt ?? null };
+        return {
+          allowed: false,
+          reason: String(j?.reason ?? "denied"),
+          nextAllowedAt: j?.nextAllowedAt ?? null,
+        };
       }
 
-      return { allowed: null as const, reason: "softfail", nextAllowedAt: null };
+      return { allowed: null, reason: "softfail", nextAllowedAt: null };
     } catch {
-      return { allowed: null as const, reason: "softfail", nextAllowedAt: null };
+      return { allowed: null, reason: "softfail", nextAllowedAt: null };
     }
   };
 
@@ -2269,9 +2286,6 @@ export default function Page() {
     setUsdddAllocated(Math.max(0, allocNow - takeAllocated));
     setUsdddAcquired((p) => Math.max(0, p - takeAcquired));
     setTreasuryUSDDD((t) => t + cost);
-
-    // apply dig gate after spending succeeds
-    if (authedUser) applyDigGate(authedUser, campaign.id);
 
     await performDig(campaign);
   };
