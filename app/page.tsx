@@ -2090,6 +2090,7 @@ export default function Page() {
     const rewardAmt = computeReward(campaign);
     const sym = campaign.tokenSymbol ?? "TOKEN";
     const tier = findTier(campaign, rewardAmt);
+    const digId = uid("dig");
 
     // cost-anchored USD value (mock economics)
     const usdValue = sampleUsdTarget(campaign.costUSDDD);
@@ -2100,6 +2101,23 @@ export default function Page() {
         ? clamp(usdValue / rewardAmt, 0.000001, 1000)
         : null;
 
+    // reserve globally in DB ledger (authoritative; idempotent by digId)
+    if (authedUser) {
+      try {
+        fetch("/api/boxes/reserve", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            username: authedUser,
+            box_id: campaign.id,
+            dig_id: digId,
+            amount: rewardAmt,
+          }),
+        }).catch(() => { });
+      } catch {
+        // ignore
+      }
+    }
 
     // reserve on box ledger (claimed until withdrawn)
     setCampaigns((prev) => prev.map((c) => (c.id === campaign.id ? { ...c, claimedUnwithdrawn: c.claimedUnwithdrawn + rewardAmt } : c)));
@@ -2147,7 +2165,7 @@ export default function Page() {
     setTreasureBalances((b) => ({ ...b, [sym]: (b[sym] ?? 0) + rewardAmt }));
 
     const record: DigRecord = {
-      id: uid("dig"),
+      id: digId,
       at: nowLocalDateTime(),
       campaignId: campaign.id,
       label: `${sym}/${campaign.deployChainId}`,
