@@ -886,11 +886,6 @@ export default function Page() {
     | { allowed: false; reason: string; nextAllowedAt: string | null }
     | { allowed: null; reason: "softfail"; nextAllowedAt: null };
 
-  type GateResult =
-    | { allowed: true; reason: null; nextAllowedAt: string | null }
-    | { allowed: false; reason: string; nextAllowedAt: string | null }
-    | { allowed: null; reason: "softfail"; nextAllowedAt: null };
-
   const gateDigGlobal = async (
     username: string,
     boxId: string
