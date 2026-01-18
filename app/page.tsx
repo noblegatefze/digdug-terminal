@@ -1093,25 +1093,49 @@ export default function Page() {
     }
   }, [passLoaded]);
 
-  // load persisted campaigns (boxes) on startup; fallback to seeded
+  // load campaigns (boxes) on startup:
+  // 1) try global DB (/api/boxes/list)
+  // 2) fallback to localStorage persisted
+  // 3) fallback to seeded
   useEffect(() => {
     if (!passLoaded) return;
 
-    const saved = loadCampaigns();
-    if (saved && saved.length > 0) {
-      setCampaigns(saved);
-      return;
-    }
+    (async () => {
+      // 1) DB-first
+      try {
+        const r = await fetch("/api/boxes/list", { method: "GET" });
+        if (r.ok) {
+          const j = (await r.json()) as any;
+          const dbCampaigns = Array.isArray(j?.campaigns) ? (j.campaigns as Campaign[]) : [];
+          if (dbCampaigns.length > 0) {
+            setCampaigns(dbCampaigns);
+            return; // IMPORTANT: do not write to localStorage when DB is authoritative
+          }
+        }
+      } catch {
+        // ignore DB errors; fallback continues
+      }
 
-    // first run: persist the seeded set so refresh keeps box state
-    const seeded = seedSponsorCampaigns();
-    setCampaigns(seeded);
-    saveCampaigns(seeded);
+      // 2) localStorage fallback
+      const saved = loadCampaigns();
+      if (saved && saved.length > 0) {
+        setCampaigns(saved);
+        return;
+      }
+
+      // 3) seeded fallback
+      const seeded = seedSponsorCampaigns();
+      setCampaigns(seeded);
+      saveCampaigns(seeded);
+    })();
   }, [passLoaded]);
 
-  // persist campaigns (boxes) whenever they change
+  // persist campaigns (boxes) ONLY when we are using local campaigns (Phase Zero fallback)
   useEffect(() => {
     if (!passLoaded) return;
+
+    // if DB is populated, /api/boxes/list would have loaded non-empty and we don't want local overwrites
+    // This keeps Phase Zero behavior unchanged while DB is empty.
     saveCampaigns(campaignsRef.current);
   }, [passLoaded, campaigns]);
 
