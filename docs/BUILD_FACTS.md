@@ -1,6 +1,6 @@
 # DIGDUG.DO Build Facts (Canonical for Current Deployment)
 
-**Build:** v0.1.15.0  
+**Build:** v0.1.16.0  
 **Phase:** Zero Phase Public Testnet  
 
 **Authority:**  
@@ -38,37 +38,89 @@ It is designed to be transparent, rule-based, and resistant to manipulation.
 
 ---
 
-## How much USDDD can I claim per day?
-
-- **Limit:** 5 USDDD per UTC day  
-- Applies in:
-  - Phase Zero (mock)
-  - Mainnet (real)
-- Enforced by the protocol.
-
----
-
-## What happens to the USDDD I use?
-
-- USDDD used to dig is **consumed**.
-- Consumed USDDD is credited to the **protocol treasury**.
-- Consumption is **final** and cannot be reversed.
-
----
-
 ## Phase Zero Rules (Important)
 
 ### Local vs Global State
 
 **Local (device-bound, intentional):**
-- USDDD balance
-- Phase Zero UI box state
+- USDDD balance (fuel)
+- Some UI-only elements (animations/progress display)
+- Wallet registry in Phase Zero (mock)
 
-**Global (server-enforced):**
-- Golden Finds
-- Golden Claims
-- Admin payout records
-- Global stats and observability
+**Global (server & DB authoritative):**
+- Sponsor boxes (configuration & live balances)
+- Per-user box cooldowns/limits (dig gate)
+- Golden Finds (global pacing + cap)
+- Golden Claims + payout records
+- Claims ledger (treasure claims)
+- Global stats & observability
+
+---
+
+## Sponsor Boxes (Global)
+
+In v0.1.16.0, sponsor boxes are **GLOBAL** and DB-backed.
+
+### Canonical tables
+- `dd_boxes` — box configuration (id/chain/token/cost/cooldown/status)
+- `dd_box_ledger` — immutable accounting entries
+- `dd_box_accounting` (view) — rollup derived from `dd_box_ledger`
+
+### Ledger entry types (meaning)
+- `fund_in` — increases deposited balance (seed/mock funding in Phase Zero)
+- `adjust` — increases or decreases deposited balance (safe mock tuning without deleting history)
+- `claim_reserve` — reserves rewards from the box (reduces available balance)
+- `withdraw_out` — finalizes withdrawal (reduces available balance)
+
+### Available balance (canonical)
+`available = deposited_total - withdrawn_total - claimed_unwithdrawn`
+
+### What “global” means
+- If any user digs a box successfully, the box’s available balance decreases globally for everyone.
+- Cooldowns are per-user (see Dig Gate), not shared across all users.
+
+---
+
+## Dig Gate (Global Cooldowns & Limits)
+
+In v0.1.16.0, dig cooldown and per-user limits are enforced globally via DB.
+
+### Canonical table
+- `dd_box_dig_gate` — per-user per-box counter and last dig time
+
+### Canonical API
+- `POST /api/boxes/gate`  
+  Checks and increments gate state for (username + box_id).  
+  Denies with reason:
+  - `cooldown`
+  - `limit`  
+  Returns `nextAllowedAt` for cooldown cases.
+
+### Cooldown behavior (canonical)
+- Cooldown is **per user per box** (global enforcement, not global shared lock).
+- Another user can dig the same box if they are not on cooldown and the box has available balance.
+
+---
+
+## Ledger-backed Reserves (Global)
+
+On dig success, the system creates a global reserve entry:
+
+- `POST /api/boxes/reserve` inserts a `claim_reserve` into `dd_box_ledger`  
+- Idempotency uses `dig_id` (retries must not double-reserve)
+
+This makes global box depletion **provable and auditable**.
+
+---
+
+## Claims (Treasure)
+
+Claims are stored in:
+- `dd_treasure_claims` with status `CLAIMED`, then later `WITHDRAWN`.
+
+Security rule:
+- The server resolves token/chain metadata from `dd_boxes` when inserting claims.
+- Clients cannot spoof token metadata.
 
 ---
 
@@ -76,13 +128,11 @@ It is designed to be transparent, rule-based, and resistant to manipulation.
 
 ### How do I register?
 - Open https://digdug.do
-- In the Terminal, type:
-  `register`
+- In the Terminal, type: `register`
 - Follow the on-screen prompts.
 
 ### How do I log in?
-- In the Terminal, type:
-  `login`
+- In the Terminal, type: `login`
 
 ---
 
@@ -94,8 +144,7 @@ Some actions require Telegram verification.
 1. DM **@DigsterBot**
 2. Run: `/verify`
 3. Copy the verification code (DG-XXXX)
-4. In the DIGDUG Terminal, type:  
-   `verify DG-XXXX`
+4. In the DIGDUG Terminal, type: `verify DG-XXXX`
 
 Verification binds:
 - Terminal Pass
@@ -113,113 +162,39 @@ Verification binds:
   - Verified Telegram user
 
 ### How do I claim a Golden Find?
-In Telegram:  
-`/claim GF-XXXX`
+In Telegram: `/claim GF-XXXX`
 
 ### How are Golden Finds paid?
-- Admin marks payouts using:  
-  `/paid GF-XXXX 0xTXHASH`
+- Admin marks payouts using: `/paid GF-XXXX 0xTXHASH`
 - Receipt is posted publicly in the group.
 - Winner also receives a DM confirmation.
 
 ---
 
-## Boxes (Sponsor Campaigns)
+## Wallet Connection (Phase Zero)
 
-### What is a Box?
-A Box is a sponsor-created campaign that users dig to receive rewards.
-
-### How do sponsor boxes work?
-- Sponsors create a box using the Sponsor Console.
-- Sponsors configure:
-  - Token metadata
-  - Cooldowns
-  - Limits
-- Users dig sponsor boxes and receive rewards.
-- Sponsors monitor box performance via stats.
-
-### Cooldowns
-- Boxes may have cooldowns (e.g. 15–60 minutes).
-- Cooldowns are enforced by box rules and shown in the UI.
-
-### Can sponsors edit a box after activation?
-- Not specified in canonical DIGDUG docs.
-
----
-
-## Rewards
-
-### Are rewards real?
-
-**Phase Zero (Testnet):**
-- Rewards are **mock**.
-- Used only to test UX and protocol logic.
+**Phase Zero:**
+- Wallet connection is **mock** (no real on-chain interaction yet).
 
 **Mainnet (Future):**
-- Rewards will be **real tokens**.
-- Withdrawable according to canonical rules.
-
----
-
-## Wallet Connection
-
-### How do I connect a wallet?
-
-**Phase Zero (Testnet):**
-- Wallet connection is **mock**.
-- No real on-chain interaction occurs.
-
-**Mainnet (Future):**
-- Wallet connection will be **real**.
-- Used for withdrawals and on-chain claims.
+- Wallet connection will be real and used for withdrawals.
 
 ---
 
 ## 2FA (Two-Factor Authentication)
 
-### How does 2FA work?
-
-**Phase Zero (Testnet):**
-- 2FA is **mock**.
-- You may enter **any 6-digit code**.
-- This is for UX testing only.
+**Phase Zero:**
+- 2FA is **mock UX** only.
 
 **Mainnet (Future):**
-- 2FA will use **Google Authenticator** or equivalent.
-- Real enforcement will apply.
-
----
-
-## How do I see my rewards?
-
-- Use the Terminal UI.
-- Use Sponsor or User stats commands where available.
-- Golden Find receipts are also posted in Telegram.
-
----
-
-## How do I see how many Golden Finds are available?
-
-- Availability is global and time-based.
-- Digster AI can answer current limits.
-- UI messaging reflects pacing, not exact counters.
+- 2FA will use Google Authenticator or equivalent with real enforcement.
 
 ---
 
 ## Whitepaper
 
-### Where is the whitepaper?
-- Canonical protocol documentation lives in `/whitepaper/**`
-- Digster AI reads directly from the whitepaper repository.
-
----
-
-## Is there a DIGDUG token?
-
-- **USDDD** is the protocol fuel token.
-- In Phase Zero, it is mock.
-- In Mainnet, it will be a real on-chain asset.
-- No other tokens are defined at this time.
+Canonical protocol documentation lives in `/whitepaper/**`.  
+Digster AI reads from the whitepaper repository plus this build facts file.
 
 ---
 
