@@ -15,7 +15,7 @@ const supabaseAdmin = createClient(
 
 const TELEGRAM_TOKEN = reqEnv("TELEGRAM_BOT_TOKEN");
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
-const TG_GROUP_ID = reqEnv("TELEGRAM_GROUP_ID");
+const TG_GROUP_ID = process.env.TELEGRAM_GROUP_ID || "";
 
 async function tgCall(method: string, payload: any) {
   const res = await fetch(`${TELEGRAM_API}/${method}`, {
@@ -107,6 +107,18 @@ export async function POST(req: NextRequest) {
   if (upErr) {
     console.error("[tg verify] update error:", upErr);
     return NextResponse.json({ ok: false, error: "update_failed" }, { status: 500 });
+  }
+
+  if (!TG_GROUP_ID) {
+    console.error("[tg verify] TELEGRAM_GROUP_ID not set; skipping announce/unmute");
+    return NextResponse.json({
+      ok: true,
+      username,
+      tg_user_id: row.tg_user_id,
+      terminal_user_id: user.id,
+      code,
+      warn: "TELEGRAM_GROUP_ID not set; user remains muted",
+    });
   }
 
   // 4) Announce verification in group (fire-and-forget)
