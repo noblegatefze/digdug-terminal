@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import { loadDocs } from "./docs";
 
 const BUILD_INFO = {
-  version: "v0.1.15.0",
+  version: "v0.1.16.0",
   commit: process.env.VERCEL_GIT_COMMIT_SHA || "local",
 };
 

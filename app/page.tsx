@@ -270,7 +270,7 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.1.15.0";
+const BUILD_VERSION = "Zero Phase v0.1.16.0";
 
 // local storage keys
 const STORAGE_KEY_PASS = "dd_terminal_pass_v1";
