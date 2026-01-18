@@ -7,42 +7,138 @@ const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 
 type InlineKeyboard = { inline_keyboard: Array<Array<{ text: string; url?: string; callback_data?: string }>> };
 
-async function sendMessage(chatId: number, text: string, opts?: { replyMarkup?: InlineKeyboard }) {
-  await fetch(`${TELEGRAM_API}/sendMessage`, {
+async function tgCall(method: string, payload: any) {
+  const res = await fetch(`${TELEGRAM_API}/${method}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text,
-      parse_mode: "HTML",
-      disable_web_page_preview: true,
-      ...(opts?.replyMarkup ? { reply_markup: opts.replyMarkup } : {}),
-    }),
+    body: JSON.stringify(payload),
+  });
+
+  const json = await res.json().catch(() => ({} as any));
+  if (!res.ok || json?.ok === false) {
+    const err: any = new Error(`tg_${method}_failed`);
+    err.status = res.status;
+    err.tg = json;
+    err.payload = payload;
+    throw err;
+  }
+  return json;
+}
+
+async function sendMessage(chatId: number, text: string, opts?: { replyMarkup?: InlineKeyboard }) {
+  await tgCall("sendMessage", {
+    chat_id: chatId,
+    text,
+    parse_mode: "HTML",
+    disable_web_page_preview: true,
+    ...(opts?.replyMarkup ? { reply_markup: opts.replyMarkup } : {}),
   });
 }
 
 // Used when we need to know if DM fails (user never started bot)
 async function sendMessageChecked(chatId: number, text: string, opts?: { replyMarkup?: InlineKeyboard }) {
-  const res = await fetch(`${TELEGRAM_API}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text,
-      parse_mode: "HTML",
-      disable_web_page_preview: true,
-      ...(opts?.replyMarkup ? { reply_markup: opts.replyMarkup } : {}),
-    }),
+  return await tgCall("sendMessage", {
+    chat_id: chatId,
+    text,
+    parse_mode: "HTML",
+    disable_web_page_preview: true,
+    ...(opts?.replyMarkup ? { reply_markup: opts.replyMarkup } : {}),
   });
+}
 
-  const json = await res.json().catch(() => ({} as any));
-  if (!res.ok || json?.ok === false) {
-    const err: any = new Error("telegram_send_failed");
-    err.status = res.status;
-    err.tg = json;
-    throw err;
+async function deleteMessage(chatId: number, messageId: number) {
+  try {
+    await tgCall("deleteMessage", { chat_id: chatId, message_id: messageId });
+  } catch (e) {
+    // ignore (missing perms etc.)
+    console.error("[tg] deleteMessage failed:", (e as any)?.tg ?? e);
   }
-  return json;
+}
+
+function restrictedPerms() {
+  // Most restrictive: cannot send anything
+  return {
+    can_send_messages: false,
+    can_send_audios: false,
+    can_send_documents: false,
+    can_send_photos: false,
+    can_send_videos: false,
+    can_send_video_notes: false,
+    can_send_voice_notes: false,
+    can_send_polls: false,
+    can_send_other_messages: false,
+    can_add_web_page_previews: false,
+    can_change_info: false,
+    can_invite_users: false,
+    can_pin_messages: false,
+    can_manage_topics: false,
+  };
+}
+
+function normalPerms() {
+  // Reasonable defaults for normal members
+  return {
+    can_send_messages: true,
+    can_send_audios: true,
+    can_send_documents: true,
+    can_send_photos: true,
+    can_send_videos: true,
+    can_send_video_notes: true,
+    can_send_voice_notes: true,
+    can_send_polls: true,
+    can_send_other_messages: true,
+    can_add_web_page_previews: true,
+    can_change_info: false,
+    can_invite_users: true,
+    can_pin_messages: false,
+    can_manage_topics: false,
+  };
+}
+
+async function restrictMember(chatId: number, userId: number) {
+  try {
+    await tgCall("restrictChatMember", {
+      chat_id: chatId,
+      user_id: userId,
+      permissions: restrictedPerms(),
+    });
+  } catch (e) {
+    console.error("[tg] restrictChatMember failed:", (e as any)?.tg ?? e);
+  }
+}
+
+async function unrestrictMember(chatId: number, userId: number) {
+  try {
+    await tgCall("restrictChatMember", {
+      chat_id: chatId,
+      user_id: userId,
+      permissions: normalPerms(),
+    });
+  } catch (e) {
+    console.error("[tg] unrestrictChatMember failed:", (e as any)?.tg ?? e);
+  }
+}
+
+async function banMember(chatId: number, userId: number, reason?: string) {
+  try {
+    await tgCall("banChatMember", {
+      chat_id: chatId,
+      user_id: userId,
+      revoke_messages: true,
+    });
+  } catch (e) {
+    console.error("[tg] banChatMember failed:", reason, (e as any)?.tg ?? e);
+  }
+}
+
+async function kickMember(chatId: number, userId: number, reason?: string) {
+  // Kick = ban then unban
+  try {
+    await tgCall("banChatMember", { chat_id: chatId, user_id: userId, revoke_messages: true });
+    await tgCall("unbanChatMember", { chat_id: chatId, user_id: userId, only_if_banned: true });
+  } catch (e) {
+    console.error("[tg] kickMember failed:", reason, (e as any)?.tg ?? e);
+  }
 }
 
 function reqEnv(name: string) {
@@ -96,7 +192,8 @@ function getMsg(update: any) {
 
 function getText(update: any): string {
   const msg = getMsg(update);
-  return String(msg?.text ?? "").trim();
+  const t = msg?.text ?? msg?.caption ?? "";
+  return String(t).trim();
 }
 
 function getChat(update: any) {
@@ -123,6 +220,10 @@ function displayName(update: any): string {
   return full || "user";
 }
 
+function mentionUserHtml(tgUserId: number, fallbackLabel = "user") {
+  return `<a href="tg://user?id=${tgUserId}">${escapeHtml(fallbackLabel)}</a>`;
+}
+
 function generateVerifyCode() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let out = "DG-";
@@ -143,7 +244,6 @@ function maskEvmAddress(addr: string) {
 function looksLikeTxHash(h: string) {
   const s = h.trim();
   if (/^0x[a-fA-F0-9]{16,}$/.test(s)) return true;
-  // allow bscscan link
   if (s.includes("bscscan.com/tx/")) return true;
   return false;
 }
@@ -171,9 +271,13 @@ function welcomeText(firstName?: string, graceMinutes = 10) {
   const first = firstName ? ` ${firstName}` : "";
   return `Welcome${first}.
 
+<b>DIGDUG.DO</b> is a terminal-style crypto treasure hunt.
+You dig using <b>USDDD</b> protocol fuel and can win sponsor tokens.
+
 <b>Verification required</b> (Phase Zero testers)
 
-You have <b>${graceMinutes} minutes</b> to verify your Terminal Pass or you will be removed.
+You are restricted until verified.
+You have <b>${graceMinutes} minutes</b> to verify or you will be removed.
 
 <b>Step 1:</b> DM @DigsterBot and type <code>/verify</code>
 <b>Step 2:</b> Go to https://digdug.do and in Terminal type:
@@ -227,6 +331,97 @@ async function maybeSendGraceExpiryReminders() {
   }
 }
 
+// Auto-kick expired pending joins (no cron — runs on any webhook)
+async function maybeEnforceGraceExpiry() {
+  const nowIso = new Date().toISOString();
+
+  const { data: rows, error } = await supabaseAdmin
+    .from("dd_tg_pending_joins")
+    .select("group_chat_id,tg_user_id,grace_expires_at,status")
+    .eq("status", "PENDING")
+    .lte("grace_expires_at", nowIso)
+    .limit(25);
+
+  if (error) {
+    console.error("[tg] expiry query failed:", error);
+    return;
+  }
+  if (!rows || rows.length === 0) return;
+
+  for (const r of rows as any[]) {
+    const groupChatId = Number(r.group_chat_id);
+    const tgUserId = Number(r.tg_user_id);
+
+    await kickMember(groupChatId, tgUserId, "grace_expired");
+
+    // Mark as removed; reuse reminded_at as a processed marker (so reminder sweep won't touch it)
+    const { error: uErr } = await supabaseAdmin
+      .from("dd_tg_pending_joins")
+      .update({ status: "REMOVED", reminded_at: new Date().toISOString() })
+      .eq("group_chat_id", String(groupChatId))
+      .eq("tg_user_id", tgUserId);
+
+    if (uErr) console.error("[tg] expiry update failed:", uErr);
+
+    // Optional: announce removal (keep it quiet)
+    // await sendMessage(groupChatId, `⛔ Removed <a href="tg://user?id=${tgUserId}">user</a> (not verified).`);
+  }
+}
+
+// Auto-unrestrict verified users (checks dd_tg_verify_codes used_at not null)
+async function maybeAutoUnrestrictVerified() {
+  const nowIso = new Date().toISOString();
+
+  const { data: rows, error } = await supabaseAdmin
+    .from("dd_tg_pending_joins")
+    .select("group_chat_id,tg_user_id,grace_expires_at,status")
+    .eq("status", "PENDING")
+    .gt("grace_expires_at", nowIso)
+    .limit(25);
+
+  if (error) {
+    console.error("[tg] pending query failed:", error);
+    return;
+  }
+  if (!rows || rows.length === 0) return;
+
+  for (const r of rows as any[]) {
+    const groupChatId = Number(r.group_chat_id);
+    const tgUserId = Number(r.tg_user_id);
+
+    const { data: links, error: linkErr } = await supabaseAdmin
+      .from("dd_tg_verify_codes")
+      .select("terminal_user_id, used_at")
+      .eq("tg_user_id", tgUserId)
+      .not("used_at", "is", null)
+      .order("used_at", { ascending: false })
+      .limit(1);
+
+    if (linkErr) {
+      console.error("[tg] verify check failed:", linkErr);
+      continue;
+    }
+
+    const terminalUserId = (links?.[0] as any)?.terminal_user_id;
+    if (!terminalUserId) continue;
+
+    await unrestrictMember(groupChatId, tgUserId);
+
+    const { error: uErr } = await supabaseAdmin
+      .from("dd_tg_pending_joins")
+      .update({ status: "VERIFIED", reminded_at: new Date().toISOString() })
+      .eq("group_chat_id", String(groupChatId))
+      .eq("tg_user_id", tgUserId);
+
+    if (uErr) console.error("[tg] verified update failed:", uErr);
+
+    // Minimal confirmation (optional)
+    try {
+      await sendMessage(groupChatId, `✅ Verified: <a href="tg://user?id=${tgUserId}">member</a>`);
+    } catch {}
+  }
+}
+
 function adminIdSet(): Set<number> {
   const raw = envOptional("TG_ADMIN_USER_IDS")
     .split(",")
@@ -246,7 +441,6 @@ function isAdminUser(tgUserId: number): boolean {
 }
 
 async function lookupTgUserLabel(tgUserId: number): Promise<string> {
-  // try dd_tg_chats for a nicer label (private chat metadata)
   const { data } = await supabaseAdmin
     .from("dd_tg_chats")
     .select("title, username")
@@ -261,10 +455,151 @@ async function lookupTgUserLabel(tgUserId: number): Promise<string> {
 }
 
 function escapeHtml(s: string) {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** --- Moderation heuristics (simple + effective) --- */
+
+const ALLOWLIST_DOMAINS = [
+  "digdug.do",
+  "t.me/digsterbot",
+  "t.me/digdugdo",
+  "bscscan.com/tx/",
+];
+
+function containsLink(text: string, msg: any): boolean {
+  const t = text || "";
+  if (/(https?:\/\/|www\.)/i.test(t)) return true;
+  if (/(t\.me\/|telegram\.me\/)/i.test(t)) return true;
+
+  const ents = [...(msg?.entities ?? []), ...(msg?.caption_entities ?? [])];
+  for (const e of ents) {
+    if (e?.type === "url" || e?.type === "text_link") return true;
+  }
+  return false;
+}
+
+function allowlistedLink(text: string): boolean {
+  const s = (text || "").toLowerCase();
+  return ALLOWLIST_DOMAINS.some((d) => s.includes(d));
+}
+
+function looksScammy(text: string): boolean {
+  const s = (text || "").toLowerCase();
+  const flags = [
+    "airdrop",
+    "claim now",
+    "claim your",
+    "bonus",
+    "support",
+    "customer support",
+    "verify wallet",
+    "connect wallet",
+    "seed phrase",
+    "private key",
+    "urgent",
+    "limited time",
+    "free usdt",
+    "free token",
+    "giveaway",
+    "whitelist",
+  ];
+  return flags.some((f) => s.includes(f));
+}
+
+function isCommandAllowlisted(text: string): boolean {
+  const t = (text || "").trim();
+  if (!t.startsWith("/")) return false;
+  const cmd = t.split(/\s+/)[0].toLowerCase();
+  const ok = new Set([
+    "/ask",
+    "/ask@digsterbot",
+    "/paid",
+    "/paid@digsterbot",
+    "/claim",
+    "/claim@digsterbot",
+    "/ping",
+    "/ping@digsterbot",
+    "/chatid",
+    "/chatid@digsterbot",
+    "/help",
+    "/start",
+  ]);
+  return ok.has(cmd);
+}
+
+async function isVerifiedTgUser(tgUserId: number): Promise<boolean> {
+  const { data, error } = await supabaseAdmin
+    .from("dd_tg_verify_codes")
+    .select("terminal_user_id, used_at")
+    .eq("tg_user_id", tgUserId)
+    .not("used_at", "is", null)
+    .order("used_at", { ascending: false })
+    .limit(1);
+
+  if (error) return false;
+  return !!(data?.[0] as any)?.terminal_user_id;
+}
+
+async function isPendingInThisGroup(groupChatId: number, tgUserId: number): Promise<boolean> {
+  const { data, error } = await supabaseAdmin
+    .from("dd_tg_pending_joins")
+    .select("status")
+    .eq("group_chat_id", String(groupChatId))
+    .eq("tg_user_id", tgUserId)
+    .limit(1);
+
+  if (error) return false;
+  return String((data?.[0] as any)?.status || "") === "PENDING";
+}
+
+/** Join processing (restrict + store + welcome) */
+async function processJoin(groupChatId: number, user: any, source: "chat_member" | "new_chat_members") {
+  const tgUserId = Number(user?.id);
+  if (!tgUserId) return;
+
+  // Auto-ban bots
+  if (user?.is_bot) {
+    await banMember(groupChatId, tgUserId, "bot_join");
+    return;
+  }
+
+  const graceMinutes = 10;
+  const graceExpiresAt = new Date(Date.now() + graceMinutes * 60 * 1000).toISOString();
+
+  // De-dupe welcome spam: if warned_at exists very recently, skip sending another welcome
+  const { data: existing } = await supabaseAdmin
+    .from("dd_tg_pending_joins")
+    .select("warned_at,status")
+    .eq("group_chat_id", String(groupChatId))
+    .eq("tg_user_id", tgUserId)
+    .limit(1);
+
+  const warnedAt = (existing?.[0] as any)?.warned_at ? new Date((existing?.[0] as any).warned_at) : null;
+  const alreadyWarnedRecently = warnedAt ? Date.now() - warnedAt.getTime() < 90 * 1000 : false;
+
+  // Upsert pending join record
+  const { error } = await supabaseAdmin
+    .from("dd_tg_pending_joins")
+    .upsert(
+      {
+        group_chat_id: String(groupChatId),
+        tg_user_id: tgUserId,
+        grace_expires_at: graceExpiresAt,
+        warned_at: new Date().toISOString(),
+        status: "PENDING",
+      },
+      { onConflict: "group_chat_id,tg_user_id" }
+    );
+
+  if (error) console.error("[tg] pending join upsert error:", source, error);
+
+  // Restrict immediately until verified
+  await restrictMember(groupChatId, tgUserId);
+
+  if (!alreadyWarnedRecently) {
+    await sendMessage(groupChatId, welcomeText(user?.first_name, graceMinutes), { replyMarkup: verifyButton() });
+  }
 }
 
 export async function GET() {
@@ -288,8 +623,10 @@ export async function POST(req: NextRequest) {
     await upsertTgChat(chatAny);
   }
 
-  // Opportunistic reminder sweep (no cron required)
+  // Opportunistic sweeps (no cron required)
+  await maybeAutoUnrestrictVerified();
   await maybeSendGraceExpiryReminders();
+  await maybeEnforceGraceExpiry();
 
   const text = getText(update);
   const chat = getChat(update);
@@ -303,38 +640,73 @@ export async function POST(req: NextRequest) {
   const cmUser = cmNew?.user;
 
   if (cmChat?.id && (cmChat?.type === "group" || cmChat?.type === "supergroup") && cmUser?.id && cmStatus === "member") {
-    const groupChatId = Number(cmChat.id);
-    const tgUserId = Number(cmUser.id);
-
-    const graceMinutes = 10;
-    const graceExpiresAt = new Date(Date.now() + graceMinutes * 60 * 1000).toISOString();
-
-    const { error } = await supabaseAdmin
-      .from("dd_tg_pending_joins")
-      .upsert(
-        {
-          group_chat_id: String(groupChatId),
-          tg_user_id: tgUserId,
-          grace_expires_at: graceExpiresAt,
-          warned_at: new Date().toISOString(),
-          status: "PENDING",
-        },
-        { onConflict: "group_chat_id,tg_user_id" }
-      );
-
-    if (error) console.error("[tg] pending join upsert error (chat_member):", error);
-
-    await sendMessage(groupChatId, welcomeText(cmUser?.first_name, graceMinutes), { replyMarkup: verifyButton() });
+    await processJoin(Number(cmChat.id), cmUser, "chat_member");
     return NextResponse.json({ ok: true });
   }
 
   if (!chatId) return NextResponse.json({ ok: true });
 
-  // /ask (GROUP preferred)
-  if (text === "/ask" || text.startsWith("/ask ") || text.startsWith("/ask@")) {
-    const isGroup = chat?.type === "group" || chat?.type === "supergroup";
+  /** --- Group anti-spam/moderation (runs before commands) --- */
+  const msg = getMsg(update);
+  const isGroup = chat?.type === "group" || chat?.type === "supergroup";
+  const u = fromUser(update);
+  const tgUserId = u?.id ? Number(u.id) : null;
 
-    // allow "/ask@DigsterBot ..." format
+  if (isGroup && msg && tgUserId) {
+    const isAdmin = isAdminUser(tgUserId);
+
+    // Handle new_chat_members join messages (also restrict + welcome)
+    const newMembers = msg?.new_chat_members;
+    if (newMembers && Array.isArray(newMembers) && newMembers.length > 0) {
+      for (const m of newMembers) {
+        await processJoin(chatId, m, "new_chat_members");
+      }
+
+      // Optional: delete the system join message to reduce spam noise
+      // await deleteMessage(chatId, Number(msg.message_id));
+
+      return NextResponse.json({ ok: true });
+    }
+
+    // Basic spam filter (ignore admin + allowlisted commands)
+    const t = String(text || "");
+    const commandOk = isCommandAllowlisted(t);
+    if (!isAdmin && !commandOk) {
+      const hasLink = containsLink(t, msg);
+      const scam = looksScammy(t);
+
+      // Determine user state
+      const pending = await isPendingInThisGroup(chatId, tgUserId);
+      const verified = await isVerifiedTgUser(tgUserId);
+
+      // Unverified (pending or not verified) + any link => delete + ban (strict)
+      if (!verified && (pending || true) && hasLink && !allowlistedLink(t)) {
+        await deleteMessage(chatId, Number(msg.message_id));
+        await banMember(chatId, tgUserId, "unverified_link");
+        return NextResponse.json({ ok: true });
+      }
+
+      // Scammy content + link => delete + ban
+      if ((hasLink && scam) && !allowlistedLink(t)) {
+        await deleteMessage(chatId, Number(msg.message_id));
+        await banMember(chatId, tgUserId, "scam_link");
+        return NextResponse.json({ ok: true });
+      }
+
+      // Verified users: links are allowed only if allowlisted; otherwise delete + warn
+      if (verified && hasLink && !allowlistedLink(t)) {
+        await deleteMessage(chatId, Number(msg.message_id));
+        const who = mentionUserHtml(tgUserId, displayName(update));
+        await sendMessage(chatId, `⚠️ ${who} links are restricted here. Use DIGDUG.DO links only.`);
+        return NextResponse.json({ ok: true });
+      }
+    }
+  }
+
+  /** --- Existing command handlers below (mostly unchanged) --- */
+
+  // /ask
+  if (text === "/ask" || text.startsWith("/ask ") || text.startsWith("/ask@")) {
     const firstSpace = text.indexOf(" ");
     const qRaw = firstSpace >= 0 ? text.slice(firstSpace + 1).trim() : "";
 
@@ -343,24 +715,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // If you want it GROUP-only, uncomment this:
-    // if (!isGroup) {
-    //   await sendMessage(chatId, "Please use /ask in the main group: https://t.me/digdugdo");
-    //   return NextResponse.json({ ok: true });
-    // }
-
     try {
-      // Force Telegram-friendly brevity via a lightweight directive
       const q = `${qRaw}\n\n(Answer for Telegram: max 8 short lines. Keep it punchy. Include up to 2 source paths.)`;
-
       const result = await askBrain(q);
 
       let out = String(result.answer || "").trim();
       if (!out) out = "No answer returned.";
 
       out = out.split("\n").slice(0, 8).join("\n");
-
-      // hard cap for Telegram (4096 limit; keep margin)
       if (out.length > 3500) out = out.slice(0, 3500) + "\n…";
 
       const header = `<b>Digster AI</b> (v${result.build?.version ?? "?"})\n`;
@@ -410,7 +772,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // Find golden event by claim code
     const { data: evRows, error: evErr } = await supabaseAdmin
       .from("dd_tg_golden_events")
       .select("id, token, chain, usd_value")
@@ -429,7 +790,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // Find claim row for that event
     const { data: claimRows, error: cErr } = await supabaseAdmin
       .from("dd_tg_golden_claims")
       .select("id, tg_user_id, group_chat_id, payout_usdt_bep20, paid_at, paid_tx_hash")
@@ -449,7 +809,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // Mark paid
     const nowIso = new Date().toISOString();
     const { error: uErr } = await supabaseAdmin
       .from("dd_tg_golden_claims")
@@ -469,27 +828,20 @@ export async function POST(req: NextRequest) {
     const winnerLabel = await lookupTgUserLabel(Number(claim.tg_user_id));
     const maskedAddr = claim.payout_usdt_bep20 ? maskEvmAddress(String(claim.payout_usdt_bep20)) : "N/A";
 
-    // Post receipt publicly (same group)
     await sendMessage(
       chatId,
       `✅ <b>PAID</b>\n` +
-      `Claim: <b>${claimCode}</b>\n` +
-      `Winner: <b>${winnerLabel}</b>\n` +
-      `Payout: <code>${maskedAddr}</code>\n` +
-      `Token: ${ev.token} (${ev.chain})\n` +
-      `Value: $${Number(ev.usd_value).toFixed(2)}\n` +
-      `TX: ${txUrl}`
+        `Claim: <b>${claimCode}</b>\n` +
+        `Winner: <b>${winnerLabel}</b>\n` +
+        `Payout: <code>${maskedAddr}</code>\n` +
+        `Token: ${ev.token} (${ev.chain})\n` +
+        `Value: $${Number(ev.usd_value).toFixed(2)}\n` +
+        `TX: ${txUrl}`
     );
 
-    // Also DM winner (best-effort)
     try {
-      await sendMessageChecked(
-        Number(claim.tg_user_id),
-        `✅ Payment sent.\n\nClaim: ${claimCode}\nTX: ${txUrl}\n\nThank you for testing DIGDUG.DO.`
-      );
-    } catch {
-      // ignore DM failure
-    }
+      await sendMessageChecked(Number(claim.tg_user_id), `✅ Payment sent.\n\nClaim: ${claimCode}\nTX: ${txUrl}\n\nThank you for testing DIGDUG.DO.`);
+    } catch {}
 
     return NextResponse.json({ ok: true });
   }
@@ -560,7 +912,6 @@ Open the Terminal and type:
       await sendMessage(chatId, `🏆 Claim attempt received: <b>${claimCode}</b> from <b>${who}</b>`);
     }
 
-    // Must be verified
     const { data: links, error: linkErr } = await supabaseAdmin
       .from("dd_tg_verify_codes")
       .select("terminal_user_id")
@@ -597,7 +948,6 @@ Then retry:
       return NextResponse.json({ ok: true });
     }
 
-    // Fetch golden event
     const { data: evRows, error: evErr } = await supabaseAdmin
       .from("dd_tg_golden_events")
       .select("id, terminal_user_id, token, chain, usd_value")
@@ -616,7 +966,6 @@ Then retry:
       return NextResponse.json({ ok: true });
     }
 
-    // Ensure belongs to this verified terminal user
     if (String(ev.terminal_user_id) !== String(terminalUserId)) {
       await sendMessage(chatId, `❌ ${who}: claim rejected (not your verified Terminal Pass).`);
       return NextResponse.json({ ok: true });
@@ -632,8 +981,6 @@ Then retry:
     if (insErr) {
       const m = String((insErr as any)?.message ?? "").toLowerCase();
       if (m.includes("duplicate") || m.includes("unique")) {
-        // If claim was created via DM first, group_chat_id may be NULL.
-        // When user runs /claim in the group, backfill group_chat_id so follow-up posts work.
         if (isGroup) {
           const { error: fixErr } = await supabaseAdmin
             .from("dd_tg_golden_claims")
@@ -723,14 +1070,7 @@ After payment, you will receive a receipt confirmation.`;
 
     const masked = maskEvmAddress(addr);
 
-    await sendMessage(
-      chatId,
-      `Payout address saved.
-
-USDT (BEP-20): ${addr}
-
-We will pay and then send you a receipt confirmation.`
-    );
+    await sendMessage(chatId, `Payout address saved.\n\nUSDT (BEP-20): ${addr}\n\nWe will pay and then send you a receipt confirmation.`);
 
     if (claim?.group_chat_id) {
       try {
@@ -786,44 +1126,6 @@ Group:
     const type = chat?.type ?? "unknown";
     const title = chat?.title ? `\ntitle=${chat.title}` : "";
     await sendMessage(chatId, `chat_id=${chatId}\nchat_type=${type}${title}`);
-    return NextResponse.json({ ok: true });
-  }
-
-  // Message-based join detection
-  const msg = getMsg(update);
-  const newMembers = msg?.new_chat_members;
-
-  if (newMembers && Array.isArray(newMembers) && newMembers.length > 0) {
-    if (chat?.type === "group" || chat?.type === "supergroup") {
-      const graceMinutes = 10;
-      const graceExpiresAt = new Date(Date.now() + graceMinutes * 60 * 1000).toISOString();
-
-      for (const m of newMembers) {
-        const tgUserId = m?.id;
-        const isBot = !!m?.is_bot;
-        if (!tgUserId || isBot) continue;
-
-        const { error } = await supabaseAdmin
-          .from("dd_tg_pending_joins")
-          .upsert(
-            {
-              group_chat_id: String(chatId),
-              tg_user_id: tgUserId,
-              grace_expires_at: graceExpiresAt,
-              warned_at: new Date().toISOString(),
-              status: "PENDING",
-            },
-            { onConflict: "group_chat_id,tg_user_id" }
-          );
-
-        if (error) console.error("[tg] pending join upsert error:", error);
-
-        await sendMessage(chatId, welcomeText(m?.first_name, graceMinutes), { replyMarkup: verifyButton() });
-      }
-
-      return NextResponse.json({ ok: true });
-    }
-
     return NextResponse.json({ ok: true });
   }
 
