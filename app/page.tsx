@@ -271,6 +271,8 @@ type TreasureGroup = {
 type DigGateState = { count: number; lastAt: number | null };
 
 const BUILD_VERSION = "Zero Phase v0.1.16.0";
+const BUILD_HASH = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local";
+const STORAGE_KEY_BUILD = "dd_build_v1";
 
 // local storage keys
 const STORAGE_KEY_PASS = "dd_terminal_pass_v1";
@@ -1705,8 +1707,26 @@ export default function Page() {
   // boot
   useEffect(() => {
     if (!passLoaded) return;
+    // build change detection
+    try {
+      const prev = localStorage.getItem(STORAGE_KEY_BUILD);
+      const current = `${BUILD_VERSION}@${BUILD_HASH}`;
 
-    emit("sys", `DIGDUG.DO Terminal — ${BUILD_VERSION}`);
+      if (prev !== current) {
+        localStorage.setItem(STORAGE_KEY_BUILD, current);
+
+        emit("sys", "— Terminal updated —");
+        emit("sys", `Build: ${BUILD_VERSION}`);
+        emit("sys", "Refreshing local session state…");
+
+        // clear volatile state ONLY (do not wipe identity)
+        localStorage.removeItem(STORAGE_KEY_CAMPAIGNS_V1);
+        localStorage.removeItem(STORAGE_KEY_DIG_GATE);
+      }
+    } catch {
+      // never block boot
+    }
+    emit("sys", `DIGDUG.DO Terminal — ${BUILD_VERSION} (${BUILD_HASH})`);
     emit("sys", "starting session (volatile)");
     emit("info", `Session ID: ${sessionId}`);
 
