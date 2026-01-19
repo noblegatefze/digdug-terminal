@@ -37,6 +37,27 @@ async function tgCall(method: string, payload: any) {
   return json;
 }
 
+async function upsertPendingJoin(params: {
+  tg_user_id: number;
+  group_chat_id: string;
+  status: string;
+  checked_at: string;
+}) {
+  const { error } = await supabaseAdmin
+    .from("dd_tg_pending_joins")
+    .upsert(
+      {
+        tg_user_id: params.tg_user_id,
+        group_chat_id: params.group_chat_id,
+        status: params.status,
+        checked_at: params.checked_at,
+      },
+      { onConflict: "tg_user_id,group_chat_id" }
+    );
+
+  if (error) throw error;
+}
+
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
 
@@ -121,6 +142,19 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  // 3.5) Ensure backend join-state exists even if Telegram join update was missed
+  try {
+    await upsertPendingJoin({
+      tg_user_id: row.tg_user_id,
+      group_chat_id: TG_GROUP_ID,
+      status: "verified",
+      checked_at: nowIso,
+    });
+  } catch (e) {
+    console.error("[tg verify] pending_joins upsert failed:", e);
+    // never block verification on DB tracking issues
+  }
+
   // 4) Announce verification in group (fire-and-forget)
   try {
     await tgCall("sendMessage", {
@@ -140,13 +174,41 @@ export async function POST(req: NextRequest) {
       permissions: {
         can_send_messages: true,
         can_send_media_messages: true,
+        can_send_polls: true,
         can_send_other_messages: true,
         can_add_web_page_previews: true,
+        can_invite_users: true,
+        can_change_info: false,
+        can_pin_messages: false,
+        can_manage_topics: false,
       },
     });
+
+    // mark success in DB
+    try {
+      await upsertPendingJoin({
+        tg_user_id: row.tg_user_id,
+        group_chat_id: TG_GROUP_ID,
+        status: "unmuted",
+        checked_at: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.error("[tg verify] pending_joins mark unmuted failed:", e);
+    }
   } catch (e) {
     console.error("[tg verify] unrestrict failed:", e);
-    // never block verification; user can be handled manually if TG API fails
+
+    // mark failure in DB (still don't block verification)
+    try {
+      await upsertPendingJoin({
+        tg_user_id: row.tg_user_id,
+        group_chat_id: TG_GROUP_ID,
+        status: "unmute_failed",
+        checked_at: new Date().toISOString(),
+      });
+    } catch {
+      // ignore
+    }
   }
 
   return NextResponse.json({
