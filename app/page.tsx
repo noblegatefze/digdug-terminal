@@ -270,7 +270,7 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.1.16.2";
+const BUILD_VERSION = "Zero Phase v0.1.16.3";
 const BUILD_HASH = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local";
 const STORAGE_KEY_BUILD = "dd_build_v1";
 
@@ -1917,8 +1917,20 @@ export default function Page() {
 
   const digConfirmForCampaign = (c: Campaign) => {
     const sym = c.tokenSymbol ?? "TOKEN";
-    const price = mockTokenUsdPrice(c, priceMockModeRef.current);
-    const priceStr = price == null ? "N/A" : `$${fmtUsdPrice(price)}`;
+    emit("sys", `• Token price: loading... (informational)`);
+
+    fetch(`/api/pricing/cmc?box_id=${encodeURIComponent(c.id)}`)
+      .then((r) => r.json())
+      .then((j) => {
+        const p = Number(j?.price_usd);
+        const ok = Boolean(j?.ok);
+        const price = ok && Number.isFinite(p) && p > 0 ? p : null;
+        const priceStr = price == null ? "N/A" : `$${fmtUsdPrice(price)}`;
+        emit("sys", `• Token price: ${priceStr} (informational)`);
+      })
+      .catch(() => {
+        emit("sys", `• Token price: N/A (informational)`);
+      });
 
     emit("info", `Selected: ${sym} on ${chainLabel(c.deployChainId)}`);
 
@@ -1935,8 +1947,6 @@ export default function Page() {
 
     // NEW — box remaining (already existed but we keep it prominent)
     emit("sys", `• Box remaining: ${availableBalance(c).toFixed(6)} ${sym}`);
-
-    emit("sys", `• Token price: ${priceStr} (informational)`);
 
     // gate preview (no spending yet)
     if (authedUser) {
