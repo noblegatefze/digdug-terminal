@@ -2296,7 +2296,7 @@ export default function Page() {
 
     const nextAllocated = Math.max(0, allocNow - takeAllocated);
     const nextAcquired = Math.max(0, usdddAcquiredRef.current - takeAcquired);
-    const nextTreasury = Number(treasuryUSDDDRef?.current ?? treasuryUSDDD) + cost;
+    const nextTreasury = treasuryUSDDD + cost;
 
     setUsdddAllocated(nextAllocated);
     setUsdddAcquired(nextAcquired);
