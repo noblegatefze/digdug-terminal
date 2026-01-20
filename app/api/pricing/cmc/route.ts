@@ -16,12 +16,12 @@ function asInt(v: any): number | null {
   return i > 0 ? i : null;
 }
 
-async function fetchCmcUsdPrice(cmcId: number): Promise<number | null> {
+async function fetchCmcUsdPrice(cmcId: number): Promise<{ price: number | null; debug: any | null }> {
   const key = process.env.COINMARKETCAP_API_KEY;
-  if (!key) return null;
+  if (!key) return { price: null, debug: { reason: "missing_api_key" } };
 
   const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), 2500);
+  const t = setTimeout(() => controller.abort(), 5000);
 
   try {
     const url =
@@ -37,14 +37,42 @@ async function fetchCmcUsdPrice(cmcId: number): Promise<number | null> {
       signal: controller.signal,
     });
 
-    if (!r.ok) return null;
+    const text = await r.text().catch(() => "");
+    let j: any = null;
+    try {
+      j = text ? JSON.parse(text) : null;
+    } catch {
+      j = null;
+    }
 
-    const j: any = await r.json().catch(() => null);
+    if (!r.ok) {
+      return {
+        price: null,
+        debug: {
+          status: r.status,
+          statusText: r.statusText,
+          body: j ?? text?.slice(0, 400),
+        },
+      };
+    }
+
     const p = j?.data?.[String(cmcId)]?.quote?.USD?.price;
     const n = Number(p);
-    return Number.isFinite(n) && n > 0 ? n : null;
-  } catch {
-    return null;
+
+    if (Number.isFinite(n) && n > 0) {
+      return { price: n, debug: null };
+    }
+
+    return {
+      price: null,
+      debug: {
+        status: r.status,
+        reason: "price_missing_or_invalid",
+        body: j ?? text?.slice(0, 400),
+      },
+    };
+  } catch (e: any) {
+    return { price: null, debug: { reason: "exception", message: String(e?.message ?? e) } };
   } finally {
     clearTimeout(t);
   }
@@ -67,16 +95,17 @@ export async function GET(req: NextRequest) {
   const cmc_id = asInt(metaObj?.cmc_id);
 
   if (!cmc_id) {
-    return NextResponse.json({ ok: true, box_id, cmc_id: null, price_usd: null });
+    return NextResponse.json({ ok: true, box_id, cmc_id: null, price_usd: null, debug: null });
   }
 
-  const price = await fetchCmcUsdPrice(cmc_id);
+  const out = await fetchCmcUsdPrice(cmc_id);
 
   return NextResponse.json({
     ok: true,
     box_id,
     cmc_id,
-    price_usd: price,
+    price_usd: out.price,
     price_at: new Date().toISOString(),
+    debug: out.debug,
   });
 }
