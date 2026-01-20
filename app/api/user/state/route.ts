@@ -63,22 +63,19 @@ export async function POST(req: NextRequest) {
 
         const userId = user.id as string;
 
-        // 2) Ensure dd_user_state row exists
-        const { error: upsertErr } = await supabase.from("dd_user_state").upsert(
-            {
+        // Ensure dd_user_state row exists (insert only, do NOT overwrite balances)
+        await supabase
+            .from("dd_user_state")
+            .insert({
                 user_id: userId,
-                usddd_allocated: 0,
+                usddd_allocated: 10, // initial claimable
                 usddd_acquired: 0,
                 treasury_usddd: 0,
                 acquired_total: 0,
                 updated_at: new Date().toISOString(),
-            },
-            { onConflict: "user_id" }
-        );
-
-        if (upsertErr) {
-            return NextResponse.json({ ok: false, error: "state_upsert_failed", detail: upsertErr.message }, { status: 500 });
-        }
+            })
+            .onConflict("user_id")
+            .ignore();
 
         // 3) Optional write-back (v0.1.16.6): accept client fuel and persist it
         if (body?.fuel) {
