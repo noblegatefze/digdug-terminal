@@ -270,7 +270,7 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.1.16.5";
+const BUILD_VERSION = "Zero Phase v0.1.16.6";
 const BUILD_HASH = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local";
 const STORAGE_KEY_BUILD = "dd_build_v1";
 
@@ -1192,17 +1192,42 @@ export default function Page() {
   const authedUser = terminalPass?.username ?? null;
   const twoFaEnabled = terminalPass?.twoFaEnabled ?? false;
 
-  // load persisted fuel when user becomes active
+  // load canonical fuel from server (v0.1.16.6)
   useEffect(() => {
     if (!passLoaded) return;
     if (!authedUser) return;
 
-    const s = loadFuelState(authedUser);
-    if (!s) return;
+    let cancelled = false;
 
-    setUsdddAllocated(s.allocated);
-    setUsdddAcquired(s.acquired);
-    setTreasuryUSDDD(s.treasury);
+    (async () => {
+      try {
+        const res = await fetch("/api/user/state", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: authedUser }),
+        });
+        const json = await res.json();
+
+        if (cancelled) return;
+        if (!json?.ok) return;
+
+        const allocated = Number(json?.usddd?.allocated ?? 0);
+        const acquired = Number(json?.usddd?.acquired ?? 0);
+        const treasury = Number(json?.usddd?.treasury ?? 0);
+
+        if (!Number.isFinite(allocated) || !Number.isFinite(acquired) || !Number.isFinite(treasury)) return;
+
+        setUsdddAllocated(allocated);
+        setUsdddAcquired(acquired);
+        setTreasuryUSDDD(treasury);
+      } catch {
+        // ignore for now
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [passLoaded, authedUser]);
 
   // acquired total is per Terminal Pass (device-local)
@@ -1210,16 +1235,37 @@ export default function Page() {
     setAcquiredTotal(getAcquiredTotalForUser(authedUser));
   }, [authedUser]);
 
-  // persist fuel state (Phase Zero anti-refresh exploit)
+  // persist fuel state (v0.1.16.6: DB is source of truth; localStorage kept as cache)
   useEffect(() => {
     if (!passLoaded) return;
     if (!authedUser) return;
 
+    // keep the old cache for now (optional)
     saveFuelState(authedUser, {
       allocated: usdddAllocated,
       acquired: usdddAcquired,
       treasury: treasuryUSDDD,
     });
+
+    // write-through to DB (throttled)
+    const t = setTimeout(() => {
+      fetch("/api/user/state", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: authedUser,
+          fuel: {
+            allocated: usdddAllocated,
+            acquired: usdddAcquired,
+            treasury: treasuryUSDDD,
+          },
+        }),
+      }).catch(() => {
+        // ignore
+      });
+    }, 500);
+
+    return () => clearTimeout(t);
   }, [passLoaded, authedUser, usdddAllocated, usdddAcquired, treasuryUSDDD]);
 
   // scroll
