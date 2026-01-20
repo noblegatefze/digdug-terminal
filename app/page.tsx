@@ -270,7 +270,7 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.1.16.0";
+const BUILD_VERSION = "Zero Phase v0.1.16.1";
 const BUILD_HASH = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local";
 const STORAGE_KEY_BUILD = "dd_build_v1";
 
@@ -954,33 +954,13 @@ export default function Page() {
       emit("sys", "");
 
       // GOLDEN FINDS (from /api/stats/summary)
+      // UI POLICY (v0.1.17.0): never show window state or "next window" hints.
       const gToday = Number(data.golden_today ?? 0);
       const gCap = Number(data.golden_cap ?? 5);
       const gReset = String(data.golden_reset_in ?? "N/A");
-      const gNextRaw = data.golden_next_allowed_at;
-
-      let windowLabel = "OPEN";
-      let nextLabel = "Any moment";
-
-      if (gToday >= gCap) {
-        windowLabel = "CLOSED";
-        nextLabel = "UTC reset";
-      } else if (gNextRaw) {
-        const t = new Date(String(gNextRaw)).getTime();
-        if (Number.isFinite(t) && t > Date.now()) {
-          windowLabel = "LOCKED";
-          const mins = Math.ceil((t - Date.now()) / 60000);
-          if (mins <= 10) nextLabel = "Very soon";
-          else if (mins <= 60) nextLabel = "Soon";
-          else if (mins <= 180) nextLabel = "Later";
-          else nextLabel = "Later today";
-        }
-      }
 
       emit("info", "GOLDEN FINDS");
       emit("sys", `Golden Finds today: ${gToday}/${gCap}`);
-      emit("sys", `Window: ${windowLabel}`);
-      emit("sys", `Next window: ${nextLabel}`);
       emit("sys", `UTC reset in: ${gReset}`);
       emit("sys", "");
 
@@ -2044,25 +2024,9 @@ export default function Page() {
 
   const performDig = async (campaign: Campaign) => {
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-    let isGoldenActive = false;
-    try {
-      const r = await fetch("/api/stats/summary", { method: "GET" });
-      if (r.ok) {
-        const s = await r.json().catch(() => null);
-        if (s) {
-          const gToday = Number(s.golden_today ?? 0);
-          const gCap = Number(s.golden_cap ?? 5);
-          const nextAt = s.golden_next_allowed_at ? new Date(String(s.golden_next_allowed_at)).getTime() : null;
-
-          // active if not capped and not locked by nextAt
-          isGoldenActive = gToday < gCap && (!nextAt || nextAt <= Date.now());
-        }
-      }
-    } catch {
-      // ignore
-    }
-
-    const totalMs = (isGoldenActive ? 18000 : 12000) + Math.floor(Math.random() * 7000); // 12–25s
+    // UI POLICY (v0.1.17.0): never vary timing based on Golden state (anti-sniping)
+    // Keep the same feel: 12–25s total duration every time.
+    const totalMs = 12000 + Math.floor(Math.random() * 13000); // 12–25s
 
     const steps = [
       { label: "dig: connecting…", pct: 12, ms: Math.floor(totalMs * 0.22) },
@@ -2083,28 +2047,8 @@ export default function Page() {
       await sleep(s.ms);
     }
 
-    // Golden Find window status (read-only UX)
-    try {
-      const r = await fetch("/api/stats/summary", { method: "GET" });
-      if (r.ok) {
-        const s = await r.json().catch(() => null);
-        if (s) {
-          const gToday = Number(s.golden_today ?? 0);
-          const gCap = Number(s.golden_cap ?? 5);
-          const nextAt = s.golden_next_allowed_at ? new Date(String(s.golden_next_allowed_at)).getTime() : null;
-
-          if (gToday >= gCap) {
-            emit("sys", "Golden Find: all finds discovered for today. Try again after reset.");
-          } else if (nextAt && nextAt > Date.now()) {
-            emit("sys", "Golden Find: so close… try again.");
-          } else {
-            emit("sys", "Golden Find: so close… any second now.");
-          }
-        }
-      }
-    } catch {
-      // silent — stats UX should never block a dig
-    }
+    // UI POLICY (v0.1.17.0): never reveal Golden state/timing after a dig (anti-gaming)
+    emit("sys", "Nice. Stay sharp — every dig counts.");
 
     const boxBefore = availableBalance(campaign);
     const rewardAmt = computeReward(campaign);
@@ -2275,11 +2219,7 @@ export default function Page() {
         }
         if (gg.reason === "cooldown") {
           emit("warn", "COOLDOWN ACTIVE (GLOBAL)");
-          if (gg.nextAllowedAt) {
-            emit("sys", `Next allowed: ${new Date(gg.nextAllowedAt).toLocaleString()}`);
-          } else {
-            emit("sys", "Try again later.");
-          }
+          emit("sys", "Cooldown active. Try again later.");
           return;
         }
 

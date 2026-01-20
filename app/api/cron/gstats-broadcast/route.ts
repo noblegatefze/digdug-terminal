@@ -6,36 +6,6 @@ function reqEnv(name: string) {
   return v;
 }
 
-function goldenWindowLabel(p: { today: number; cap: number; nextAllowedAt: any }) {
-  const { today, cap, nextAllowedAt } = p;
-
-  if (today >= cap) {
-    return { window: "CLOSED", next: "UTC reset" };
-  }
-
-  if (!nextAllowedAt) {
-    return { window: "OPEN", next: "Any moment" };
-  }
-
-  const t = new Date(String(nextAllowedAt)).getTime();
-  if (!Number.isFinite(t)) {
-    return { window: "UNKNOWN", next: "N/A" };
-  }
-
-  const now = Date.now();
-  if (t <= now) {
-    return { window: "OPEN", next: "Any moment" };
-  }
-
-  const mins = Math.ceil((t - now) / 60000);
-
-  // Intentionally vague (don’t train users to wait for a specific time)
-  if (mins <= 10) return { window: "LOCKED", next: "Very soon" };
-  if (mins <= 60) return { window: "LOCKED", next: "Soon" };
-  if (mins <= 180) return { window: "LOCKED", next: "Later" };
-  return { window: "LOCKED", next: "Later today" };
-}
-
 function asciiGstatsMessage(data: any) {
   const attempts = Number(data?.digs_attempted ?? 0);
   const finds = Number(data?.digs_succeeded ?? 0);
@@ -52,11 +22,11 @@ function asciiGstatsMessage(data: any) {
   const boxesCreated = data?.boxes_created ?? null;
   const boxesLiveNow = data?.boxes_live_now ?? null;
 
-  // ✅ Golden Find stats (added in /api/stats/summary)
+  // ✅ Golden Find stats (from /api/stats/summary)
+  // UI POLICY (v0.1.17.0): NEVER broadcast window state or "next window" hints.
   const goldenToday = Number(data?.golden_today ?? 0);
   const goldenCap = Number(data?.golden_cap ?? 5);
   const goldenResetIn = String(data?.golden_reset_in ?? "N/A");
-  const goldenNextAllowedAt = data?.golden_next_allowed_at ?? null;
 
   const lines: string[] = [];
   lines.push("DIGDUG.DO — GLOBAL PULSE (6H)");
@@ -75,13 +45,9 @@ function asciiGstatsMessage(data: any) {
   if (rejected > 0) lines.push(`- Rejected: ${rejected}`);
   lines.push("");
 
-  // ✅ Golden section
-  const g = goldenWindowLabel({ today: goldenToday, cap: goldenCap, nextAllowedAt: goldenNextAllowedAt });
-
+  // ✅ Golden section (anti-gaming safe subset)
   lines.push("GOLDEN FINDS");
   lines.push(`- Today: ${goldenToday}/${goldenCap}`);
-  lines.push(`- Window: ${g.window}`);
-  lines.push(`- Next window: ${g.next}`);
   lines.push(`- UTC reset in: ${goldenResetIn}`);
   lines.push("");
 
@@ -118,10 +84,7 @@ function asciiGstatsMessage(data: any) {
 export async function GET() {
   const ADMIN_KEY = process.env.ADMIN_API_KEY;
   if (!ADMIN_KEY) {
-    return NextResponse.json(
-      { ok: false, error: "ADMIN_API_KEY not set" },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: "ADMIN_API_KEY not set" }, { status: 500 });
   }
 
   // 1) Fetch stats from internal endpoint
