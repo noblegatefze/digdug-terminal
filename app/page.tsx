@@ -3512,7 +3512,7 @@ export default function Page() {
               fuel: {
                 allocated: usdddAllocatedRef.current,
                 acquired: nextAcquired,
-                treasury: treasuryUSDDDRef.current,
+                treasury: treasuryUSDDD,
               },
             }),
           });
