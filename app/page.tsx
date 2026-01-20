@@ -3500,42 +3500,44 @@ export default function Page() {
       }
 
       // Persist to DB via API, then re-hydrate from DB response (single source of truth)
-      try {
-        const res = await fetch("/api/user/state", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            username: terminalPass!.username,
-            fuel: {
-              allocated: usdddAllocatedRef.current,
-              acquired: nextAcquired,
-              treasury: treasuryUSDDDRef.current,
-            },
-          }),
-        });
-        const json = await res.json();
-
-        if (!json?.ok) {
-          emit("err", "Acquire failed (server). Please try again.");
-          setPrompt({ mode: "IDLE" });
-          return;
-        }
-
-        const allocated = Number(json.usddd?.allocated ?? 0);
-        const acquired = Number(json.usddd?.acquired ?? 0);
-        const treasury = Number(json.usddd?.treasury ?? 0);
-
-        setUsdddAllocated(allocated);
-        setUsdddAcquired(acquired);
-        setTreasuryUSDDD(treasury);
-
-        emit("ok", `Acquired confirmed: +${amt.toFixed(2)} USDDD (Acquired).`);
-        emit("sys", `Acquired total: ${acquired.toFixed(2)} / ${ACQUIRE_CAP}`);
-      } catch {
-        emit("err", "Acquire failed (network). Please try again.");
-      }
-
       setPrompt({ mode: "IDLE" });
+
+      (async () => {
+        try {
+          const res = await fetch("/api/user/state", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              username: terminalPass!.username,
+              fuel: {
+                allocated: usdddAllocatedRef.current,
+                acquired: nextAcquired,
+                treasury: treasuryUSDDDRef.current,
+              },
+            }),
+          });
+
+          const json = await res.json();
+
+          if (!json?.ok) {
+            emit("err", "Acquire failed (server).");
+            return;
+          }
+
+          const allocated = Number(json.usddd?.allocated ?? 0);
+          const acquired = Number(json.usddd?.acquired ?? 0);
+          const treasury = Number(json.usddd?.treasury ?? 0);
+
+          setUsdddAllocated(allocated);
+          setUsdddAcquired(acquired);
+          setTreasuryUSDDD(treasury);
+
+          emit("ok", `Acquired confirmed: +${amt.toFixed(2)} USDDD (Acquired).`);
+          emit("sys", `Acquired total: ${acquired.toFixed(2)} / ${ACQUIRE_CAP}`);
+        } catch {
+          emit("err", "Acquire failed (network).");
+        }
+      })();
       return;
     }
 
