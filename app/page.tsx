@@ -317,6 +317,7 @@ const MIN_YIELD_FLOOR = 0.000001;
 
 // docs
 const GITHUB_REPO_BASE = "https://github.com/noblegatefze/digdug-whitepaper";
+const USDDD_SCAN_URL = "https://usddd.digdug.do";
 const DOCS = {
   genesis: `${GITHUB_REPO_BASE}/blob/main/GENESIS.md`,
   whitepaper: `${GITHUB_REPO_BASE}/blob/main/WHITEPAPER.md`,
@@ -2767,7 +2768,20 @@ export default function Page() {
     if (low === "status") return void doStatus();
     if (low === "docs") return void doDocs();
     if (low === "build") return void emit("sys", `BUILD: ${BUILD_VERSION}`);
-    if (low === "gstats") return void fetchAndPrintGlobalPulse();
+    if (low === "scan" || low === "usddd scan") {
+      emit("info", "USDDD Scan (official public stats):");
+      emit("sys", USDDD_SCAN_URL);
+      emit("sys", "Use Scan for live activity, Golden Finds, box balances, and leaderboards.");
+      return;
+    }
+
+    if (low === "stats" || low === "gstats") {
+      emit("info", "Stats are now published on USDDD Scan:");
+      emit("sys", USDDD_SCAN_URL);
+      emit("sys", "This is the canonical Pre-Genesis metrics surface.");
+      emit("sys", `Tip: type ${C("scan")} anytime.`);
+      return;
+    }
 
     // AI Brain (/ask)
     if (low === "ask" || low.startsWith("ask ")) {
