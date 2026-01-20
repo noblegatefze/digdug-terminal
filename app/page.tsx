@@ -1247,25 +1247,6 @@ export default function Page() {
       treasury: treasuryUSDDD,
     });
 
-    // write-through to DB (throttled)
-    const t = setTimeout(() => {
-      fetch("/api/user/state", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username: authedUser,
-          fuel: {
-            allocated: usdddAllocated,
-            acquired: usdddAcquired,
-            treasury: treasuryUSDDD,
-          },
-        }),
-      }).catch(() => {
-        // ignore
-      });
-    }, 500);
-
-    return () => clearTimeout(t);
   }, [passLoaded, authedUser, usdddAllocated, usdddAcquired, treasuryUSDDD]);
 
   // scroll
