@@ -47,7 +47,10 @@ export async function GET() {
 
     if (!r.ok) {
       const txt = await r.text().catch(() => "");
-      return NextResponse.json({ ok: false, error: "rpc_failed", detail: txt.slice(0, 200) }, { status: 500 });
+      return NextResponse.json(
+        { ok: false, error: "rpc_failed", detail: txt.slice(0, 200) },
+        { status: 500 }
+      );
     }
 
     const data = await r.json().catch(() => ({}));
@@ -56,11 +59,10 @@ export async function GET() {
     const day = todayUtcYmd();
 
     let golden_today: number | null = null;
-    let golden_next_allowed_at: string | null = null;
 
     try {
       const gr = await fetch(
-        `${url}/rest/v1/dd_tg_golden_daily?select=count,next_allowed_at&day=eq.${encodeURIComponent(day)}`,
+        `${url}/rest/v1/dd_tg_golden_daily?select=count&day=eq.${encodeURIComponent(day)}`,
         {
           method: "GET",
           headers: {
@@ -75,7 +77,6 @@ export async function GET() {
         const rows = (await gr.json().catch(() => [])) as any[];
         const row = rows?.[0];
         if (row && typeof row.count === "number") golden_today = row.count;
-        if (row && row.next_allowed_at) golden_next_allowed_at = String(row.next_allowed_at);
       }
     } catch {
       // ignore golden enrichment errors (summary must still work)
@@ -83,15 +84,17 @@ export async function GET() {
 
     const golden_reset_in = formatHMS(msUntilNextUtcReset(new Date()));
 
-    // Return original summary + extra golden fields
+    // Return original summary + extra golden fields (no timing leak)
     return NextResponse.json({
       ...data,
       golden_today: golden_today ?? 0,
       golden_cap: GOLDEN_CAP,
-      golden_next_allowed_at,
       golden_reset_in,
     });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message ?? "server_error" }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: e?.message ?? "server_error" },
+      { status: 500 }
+    );
   }
 }
