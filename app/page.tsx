@@ -2294,9 +2294,31 @@ export default function Page() {
     const takeAllocated = Math.min(allocNow, cost);
     const takeAcquired = Math.max(0, cost - takeAllocated);
 
-    setUsdddAllocated(Math.max(0, allocNow - takeAllocated));
-    setUsdddAcquired((p) => Math.max(0, p - takeAcquired));
-    setTreasuryUSDDD((t) => t + cost);
+    const nextAllocated = Math.max(0, allocNow - takeAllocated);
+    const nextAcquired = Math.max(0, usdddAcquiredRef.current - takeAcquired);
+    const nextTreasury = Number(treasuryUSDDDRef?.current ?? treasuryUSDDD) + cost;
+
+    setUsdddAllocated(nextAllocated);
+    setUsdddAcquired(nextAcquired);
+    setTreasuryUSDDD(nextTreasury);
+
+    // Persist spend to DB (source of truth)
+    try {
+      await fetch("/api/user/state", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: terminalPass!.username,
+          fuel: {
+            allocated: nextAllocated,
+            acquired: nextAcquired,
+            treasury: nextTreasury,
+          },
+        }),
+      });
+    } catch {
+      // if network fails, UI will show updated value but DB may lag; user can retry later
+    }
 
     await performDig(campaign);
   };
