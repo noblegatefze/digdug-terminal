@@ -14,6 +14,47 @@ function asNum(v: any): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function asInt(v: any): number | null {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  const i = Math.trunc(n);
+  return i > 0 ? i : null;
+}
+
+async function fetchCmcUsdPrice(cmcId: number): Promise<number | null> {
+  const key = process.env.COINMARKETCAP_API_KEY;
+  if (!key) return null;
+
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), 2500);
+
+  try {
+    const url =
+      `https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest` +
+      `?id=${encodeURIComponent(String(cmcId))}&convert=USD`;
+
+    const r = await fetch(url, {
+      method: "GET",
+      headers: {
+        "X-CMC_PRO_API_KEY": key,
+        Accept: "application/json",
+      },
+      signal: controller.signal,
+    });
+
+    if (!r.ok) return null;
+
+    const j: any = await r.json().catch(() => null);
+    const p = j?.data?.[String(cmcId)]?.quote?.USD?.price;
+    const n = Number(p);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
 
@@ -37,10 +78,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "User not found" }, { status: 404 });
   }
 
-  // 2) resolve box token/chain + status
+  // 2) resolve box token/chain + status (+ meta for cmc_id)
   const { data: box, error: berr } = await supabase
     .from("dd_boxes")
-    .select("id,status,deploy_chain_id,token_address,token_symbol")
+    .select("id,status,deploy_chain_id,token_address,token_symbol,meta")
     .eq("id", box_id)
     .single();
 
@@ -84,19 +125,31 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 5) insert reserve ledger entry
+  // 5) optional: CMC price-at-dig-time (only if meta.cmc_id + API key exist)
+  const metaObj: any = (box as any)?.meta ?? {};
+  const cmc_id = asInt(metaObj?.cmc_id);
+  const price_usd_at_dig = cmc_id ? await fetchCmcUsdPrice(cmc_id) : null;
+  const price_at = new Date().toISOString();
+
+  // 6) insert reserve ledger entry
   const { error: ierr } = await supabase.from("dd_box_ledger").insert({
     box_id,
     entry_type: "claim_reserve",
     amount,
-    chain_id: String(box.deploy_chain_id ?? null),
-    token_address: String(box.token_address ?? null),
+    chain_id: String((box as any).deploy_chain_id ?? null),
+    token_address: String((box as any).token_address ?? null),
     meta: {
       dig_id,
       username: user.username,
       user_id: user.id,
       source: "dig",
-      token_symbol: box.token_symbol ?? null,
+      token_symbol: (box as any).token_symbol ?? null,
+
+      // pricing (v0.1.16.2)
+      cmc_id: cmc_id ?? null,
+      price_source: cmc_id ? "cmc" : null,
+      price_usd_at_dig: price_usd_at_dig ?? null,
+      price_at,
     },
   });
 
