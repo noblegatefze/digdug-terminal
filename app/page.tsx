@@ -270,7 +270,7 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.1.16.8";
+const BUILD_VERSION = "Zero Phase v0.1.16.9";
 const BUILD_HASH = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local";
 const STORAGE_KEY_BUILD = "dd_build_v1";
 
@@ -1846,6 +1846,28 @@ export default function Page() {
     emit("info", `Session ID: ${sessionId}`);
 
     sendStat("session_start");
+
+    // persist session for USDDD Scan (non-blocking)
+    try {
+      const tpRaw = localStorage.getItem(STORAGE_KEY_PASS);
+      const tp = tpRaw ? (JSON.parse(tpRaw) as TerminalPass) : null;
+
+      fetch("/api/session/log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          install_id: installId ?? null,
+          user_id: tp?.user_id ?? null,
+          username: tp?.username ?? null,
+          source: "terminal",
+        }),
+      }).catch(() => {
+        // never block boot
+      });
+    } catch {
+      // never block boot
+    }
 
     // Entry / load UX (intuitive)
     try {
