@@ -3615,58 +3615,47 @@ export default function Page() {
       const amt = Number(trimmed);
       if (!Number.isFinite(amt) || amt <= 0) return void emit("warn", "Enter a valid amount.");
 
-      // DB-backed acquired total (cross-device) = current usdddAcquired state
-      const currentAcquired = Number(usdddAcquiredRef.current ?? 0);
-      const nextAcquired = currentAcquired + amt;
-
-      if (nextAcquired > ACQUIRE_CAP + 1e-9) {
-        const remaining = Math.max(0, ACQUIRE_CAP - currentAcquired);
-        emit("err", `ACQUIRE BLOCKED // USDDD ACQUISITION CAP REACHED (${ACQUIRE_CAP})`);
-        emit("info", `Remaining cap: ${remaining.toFixed(2)} USDDD`);
-        emit("sys", "Cap applies to acquired USDDD only (not daily allocation).");
-        setPrompt({ mode: "IDLE" });
-        return;
-      }
-
-      // Persist to DB via API, then re-hydrate from DB response (single source of truth)
+      // DB-authoritative acquire (Pre-Genesis cap enforced server-side)
       setPrompt({ mode: "IDLE" });
 
       (async () => {
         try {
-          const res = await fetch("/api/user/state", {
+          const res = await fetch("/api/user/acquire", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              username: terminalPass!.username,
-              fuel: {
-                allocated: usdddAllocatedRef.current,
-                acquired: nextAcquired,
-                treasury: treasuryUSDDD,
-              },
-            }),
+            body: JSON.stringify({ username: terminalPass!.username, amount: amt }),
           });
 
-          const json = await res.json();
+          const json: any = await res.json().catch(() => ({}));
 
-          if (!json?.ok) {
+          if (!res.ok || !json?.ok) {
             emit("err", "Acquire failed (server).");
+            return;
+          }
+
+          if (json.applied === false && json.reason === "cap_reached") {
+            emit("err", `ACQUIRE BLOCKED // USDDD ACQUISITION CAP REACHED (${ACQUIRE_CAP})`);
+            emit("sys", "Cap applies to acquired USDDD only (not daily allocation).");
             return;
           }
 
           const allocated = Number(json.usddd?.allocated ?? 0);
           const acquired = Number(json.usddd?.acquired ?? 0);
           const treasury = Number(json.usddd?.treasury ?? 0);
+          const acquiredTotal = Number(json.usddd?.acquiredTotal ?? 0);
+          const credit = Number(json.credit ?? amt);
 
-          setUsdddAllocated(allocated);
-          setUsdddAcquired(acquired);
-          setTreasuryUSDDD(treasury);
+          if (Number.isFinite(allocated)) setUsdddAllocated(allocated);
+          if (Number.isFinite(acquired)) setUsdddAcquired(acquired);
+          if (Number.isFinite(treasury)) setTreasuryUSDDD(treasury);
 
-          emit("ok", `Acquired confirmed: +${amt.toFixed(2)} USDDD (Acquired).`);
-          emit("sys", `Acquired total: ${(Number(json.usddd?.acquiredTotal ?? 0)).toFixed(2)} / ${ACQUIRE_CAP}`);
+          emit("ok", `Acquired confirmed: +${(Number.isFinite(credit) ? credit : amt).toFixed(2)} USDDD (Acquired).`);
+          emit("sys", `Acquired total: ${(Number.isFinite(acquiredTotal) ? acquiredTotal : 0).toFixed(2)} / ${ACQUIRE_CAP}`);
         } catch {
           emit("err", "Acquire failed (network).");
         }
       })();
+
       return;
     }
 
