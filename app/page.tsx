@@ -3597,7 +3597,7 @@ export default function Page() {
           setTreasuryUSDDD(treasury);
 
           emit("ok", `Acquired confirmed: +${amt.toFixed(2)} USDDD (Acquired).`);
-          emit("sys", `Acquired total: ${acquiredTotal.toFixed(2)} / ${ACQUIRE_CAP}`);
+          emit("sys", `Acquired total: ${Number(json.usddd?.acquired ?? nextAcquired).toFixed(2)} / ${ACQUIRE_CAP}`);
         } catch {
           emit("err", "Acquire failed (network).");
         }
