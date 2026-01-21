@@ -270,7 +270,7 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.1.16.7";
+const BUILD_VERSION = "Zero Phase v0.1.16.8";
 const BUILD_HASH = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local";
 const STORAGE_KEY_BUILD = "dd_build_v1";
 
@@ -1230,6 +1230,47 @@ export default function Page() {
 
       } catch {
         // ignore for now
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [passLoaded, authedUser]);
+
+  // load rewards/claims from DB (v0.1.16.8: DB-authoritative)
+  useEffect(() => {
+    if (!passLoaded) return;
+    if (!authedUser) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const r = await fetch(`/api/claims/list?username=${encodeURIComponent(authedUser)}`, {
+          method: "GET",
+        });
+
+        const j = (await r.json().catch(() => ({}))) as any;
+        if (cancelled) return;
+
+        if (!r.ok || !j?.ok || !Array.isArray(j?.claims)) {
+          // do not wipe local state on softfail
+          return;
+        }
+
+        // normalize numbers defensively
+        const dbClaims = (j.claims as any[]).map((c) => ({
+          ...c,
+          amount: Number(c.amount),
+          createdAt: Number(c.createdAt),
+          withdrawnAt: c.withdrawnAt == null ? null : Number(c.withdrawnAt),
+        }));
+
+        setClaims(dbClaims);
+        setTreasureBalances(recomputeTreasureBalancesForUser(authedUser, dbClaims));
+      } catch {
+        // ignore; do not wipe local state
       }
     })();
 
