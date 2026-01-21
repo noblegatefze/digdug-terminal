@@ -1858,7 +1858,6 @@ export default function Page() {
         body: JSON.stringify({
           session_id: sessionId,
           install_id: installId ?? null,
-          user_id: tp?.user_id ?? null,
           username: tp?.username ?? null,
           source: "terminal",
         }),
