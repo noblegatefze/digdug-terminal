@@ -139,13 +139,21 @@ export async function POST(req: NextRequest) {
     const allocated = Number(state.usddd_allocated ?? 0);
     const acquired = Number(state.usddd_acquired ?? 0);
     const treasury = Number(state.treasury_usddd ?? 0);
+    const acquiredTotal = Number(state.acquired_total ?? 0);
 
     return NextResponse.json({
       ok: true,
       user: { id: userId, username: user.username },
-      usddd: { allocated, acquired, treasury, total: allocated + acquired },
+      usddd: {
+        allocated,
+        acquired,
+        treasury,
+        total: allocated + acquired,
+        acquiredTotal,
+      },
       updatedAt: state.updated_at,
     });
+
   } catch (e: any) {
     return NextResponse.json(
       { ok: false, error: "unexpected", detail: String(e?.message ?? e) },

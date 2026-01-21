@@ -270,7 +270,7 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.1.16.6";
+const BUILD_VERSION = "Zero Phase v0.1.16.7";
 const BUILD_HASH = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local";
 const STORAGE_KEY_BUILD = "dd_build_v1";
 
@@ -1214,12 +1214,20 @@ export default function Page() {
         const allocated = Number(json?.usddd?.allocated ?? 0);
         const acquired = Number(json?.usddd?.acquired ?? 0);
         const treasury = Number(json?.usddd?.treasury ?? 0);
+        const acquiredTotal = Number(json?.usddd?.acquiredTotal ?? 0);
 
-        if (!Number.isFinite(allocated) || !Number.isFinite(acquired) || !Number.isFinite(treasury)) return;
+        if (
+          !Number.isFinite(allocated) ||
+          !Number.isFinite(acquired) ||
+          !Number.isFinite(treasury) ||
+          !Number.isFinite(acquiredTotal)
+        ) return;
 
         setUsdddAllocated(allocated);
         setUsdddAcquired(acquired);
         setTreasuryUSDDD(treasury);
+        setAcquiredTotal(acquiredTotal);
+
       } catch {
         // ignore for now
       }
@@ -1230,10 +1238,44 @@ export default function Page() {
     };
   }, [passLoaded, authedUser]);
 
-  // acquired total is per Terminal Pass (device-local)
+  // one-time backfill: device-local acquired_total -> DB (Pre-Genesis safe, monotonic)
   useEffect(() => {
-    setAcquiredTotal(getAcquiredTotalForUser(authedUser));
-  }, [authedUser]);
+    if (!passLoaded) return;
+    if (!authedUser) return;
+
+    // DB already has acquiredTotal -> nothing to do
+    if (acquiredTotal > 0) return;
+
+    // read legacy local value (if any)
+    const local = getAcquiredTotalForUser(authedUser);
+    if (!Number.isFinite(local) || local <= 0) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch("/api/user/acquired-total", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: authedUser, acquiredTotal: local }),
+        });
+        const json = await res.json();
+        if (cancelled) return;
+        if (!json?.ok) return;
+
+        const next = Number(json?.acquiredTotal ?? 0);
+        if (!Number.isFinite(next)) return;
+
+        setAcquiredTotal(next);
+      } catch {
+        // ignore
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [passLoaded, authedUser, acquiredTotal]);
 
   // persist fuel state (v0.1.16.6: DB is source of truth; localStorage kept as cache)
   useEffect(() => {
@@ -3555,7 +3597,7 @@ export default function Page() {
           setTreasuryUSDDD(treasury);
 
           emit("ok", `Acquired confirmed: +${amt.toFixed(2)} USDDD (Acquired).`);
-          emit("sys", `Acquired total: ${acquired.toFixed(2)} / ${ACQUIRE_CAP}`);
+          emit("sys", `Acquired total: ${acquiredTotal.toFixed(2)} / ${ACQUIRE_CAP}`);
         } catch {
           emit("err", "Acquire failed (network).");
         }
