@@ -1279,44 +1279,9 @@ export default function Page() {
     };
   }, [passLoaded, authedUser]);
 
-  // one-time backfill: device-local acquired_total -> DB (Pre-Genesis safe, monotonic)
-  useEffect(() => {
-    if (!passLoaded) return;
-    if (!authedUser) return;
-
-    // DB already has acquiredTotal -> nothing to do
-    if (acquiredTotal > 0) return;
-
-    // read legacy local value (if any)
-    const local = getAcquiredTotalForUser(authedUser);
-    if (!Number.isFinite(local) || local <= 0) return;
-
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const res = await fetch("/api/user/acquired-total", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username: authedUser, acquiredTotal: local }),
-        });
-        const json = await res.json();
-        if (cancelled) return;
-        if (!json?.ok) return;
-
-        const next = Number(json?.acquiredTotal ?? 0);
-        if (!Number.isFinite(next)) return;
-
-        setAcquiredTotal(next);
-      } catch {
-        // ignore
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [passLoaded, authedUser, acquiredTotal]);
+  // Legacy backfill disabled:
+  // DB is now the source of truth for acquired_total.
+  // Keeping device-local acquired totals can re-inflate values after admin resets.
 
   // persist fuel state (v0.1.16.6: DB is source of truth; localStorage kept as cache)
   useEffect(() => {
