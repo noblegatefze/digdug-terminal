@@ -1719,28 +1719,52 @@ export default function Page() {
   // allocate / docs / clear / status
   const doAllocate = () => {
     if (!requirePass()) return;
-    const now = Date.now();
-    const last = loadAllocLastAt();
-    const elapsed = last ? now - last : allocationWindowMs;
-    const windows = Math.floor(elapsed / allocationWindowMs);
 
-    if (windows <= 0) {
-      const { remaining, capHit } = allocationStatus();
-      if (capHit) emit("warn", `Allocation paused: cap reached (${BASE_CAP} USDDD).`);
-      else emit("warn", `Allocation not ready. Next in ${fmtMs(remaining)}.`);
-      return;
-    }
+    (async () => {
+      try {
+        const res = await fetch("/api/user/allocate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: terminalPass!.username }),
+        });
 
-    const credit = Math.min(DAILY_ALLOCATION, Math.max(0, BASE_CAP - usdddAllocatedRef.current));
-    if (credit <= 0) {
-      saveAllocLastAt(now);
-      emit("warn", `Allocation paused: cap reached (${BASE_CAP} USDDD).`);
-      return;
-    }
+        const json: any = await res.json().catch(() => ({}));
 
-    saveAllocLastAt(now);
-    setUsdddAllocated((a) => Math.min(BASE_CAP, a + credit));
-    emit("ok", `Allocation applied: +${credit.toFixed(2)} USDDD (Allocated)`);
+        if (!res.ok || !json?.ok) {
+          emit("err", "Allocation failed (server).");
+          return;
+        }
+
+        // not applied cases
+        if (json.applied === false) {
+          if (json.reason === "cap_reached") {
+            emit("warn", `Allocation paused: cap reached (${BASE_CAP} USDDD).`);
+            return;
+          }
+          if (json.reason === "not_ready") {
+            const remainingMs = Number(json.remaining_ms ?? 0);
+            emit("warn", `Allocation not ready. Next in ${fmtMs(Number.isFinite(remainingMs) ? remainingMs : 0)}.`);
+            return;
+          }
+          emit("warn", "Allocation not available right now.");
+          return;
+        }
+
+        // applied
+        const credit = Number(json.credit ?? DAILY_ALLOCATION);
+        const allocated = Number(json.usddd?.allocated ?? usdddAllocatedRef.current);
+        const acquired = Number(json.usddd?.acquired ?? usdddAcquiredRef.current);
+        const treasury = Number(json.usddd?.treasury ?? treasuryRef.current);
+
+        if (Number.isFinite(allocated)) setUsdddAllocated(allocated);
+        if (Number.isFinite(acquired)) setUsdddAcquired(acquired);
+        if (Number.isFinite(treasury)) setTreasuryUSDDD(treasury);
+
+        emit("ok", `Allocation applied: +${(Number.isFinite(credit) ? credit : DAILY_ALLOCATION).toFixed(2)} USDDD (Allocated)`);
+      } catch {
+        emit("err", "Allocation failed (network).");
+      }
+    })();
   };
 
   const doDocs = () => {
@@ -3638,7 +3662,7 @@ export default function Page() {
           setTreasuryUSDDD(treasury);
 
           emit("ok", `Acquired confirmed: +${amt.toFixed(2)} USDDD (Acquired).`);
-          emit("sys", `Acquired total: ${Number(json.usddd?.acquired ?? nextAcquired).toFixed(2)} / ${ACQUIRE_CAP}`);
+          emit("sys", `Acquired total: ${(Number(json.usddd?.acquiredTotal ?? 0)).toFixed(2)} / ${ACQUIRE_CAP}`);
         } catch {
           emit("err", "Acquire failed (network).");
         }
