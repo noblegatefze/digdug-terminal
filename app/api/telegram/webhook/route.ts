@@ -39,10 +39,32 @@ async function sendMessage(chatId: number, text: string, opts?: { replyMarkup?: 
   });
 }
 
+async function sendMessageThread(chatId: number, threadId: number, text: string, opts?: { replyMarkup?: InlineKeyboard }) {
+  await tgCall("sendMessage", {
+    chat_id: chatId,
+    message_thread_id: threadId,
+    text,
+    parse_mode: "HTML",
+    disable_web_page_preview: true,
+    ...(opts?.replyMarkup ? { reply_markup: opts.replyMarkup } : {}),
+  });
+}
+
 // Used when we need to know if DM fails (user never started bot)
 async function sendMessageChecked(chatId: number, text: string, opts?: { replyMarkup?: InlineKeyboard }) {
   return await tgCall("sendMessage", {
     chat_id: chatId,
+    text,
+    parse_mode: "HTML",
+    disable_web_page_preview: true,
+    ...(opts?.replyMarkup ? { reply_markup: opts.replyMarkup } : {}),
+  });
+}
+
+async function sendMessageThreadChecked(chatId: number, threadId: number, text: string, opts?: { replyMarkup?: InlineKeyboard }) {
+  return await tgCall("sendMessage", {
+    chat_id: chatId,
+    message_thread_id: threadId,
     text,
     parse_mode: "HTML",
     disable_web_page_preview: true,
