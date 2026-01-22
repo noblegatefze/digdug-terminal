@@ -1136,7 +1136,10 @@ Group:
   if (text === "/chatid" || text.startsWith("/chatid@")) {
     const type = chat?.type ?? "unknown";
     const title = chat?.title ? `\ntitle=${chat.title}` : "";
-    await sendMessage(chatId, `chat_id=${chatId}\nchat_type=${type}${title}`);
+    const msg = getMsg(update);
+    const threadId = msg?.message_thread_id ?? null;
+    const threadLine = threadId ? `\nmessage_thread_id=${threadId}` : "";
+    await sendMessage(chatId, `chat_id=${chatId}\nchat_type=${type}${title}${threadLine}`);
     return;
   }
 
