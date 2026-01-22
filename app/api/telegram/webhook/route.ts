@@ -1172,13 +1172,15 @@ After payment, you will receive a receipt confirmation.`;
 
     await sendMessage(chatId, `Payout address saved.\n\nUSDT (BEP-20): ${addr}\n\nWe will pay and then send you a receipt confirmation.`);
 
-    if (claim?.group_chat_id) {
-      try {
-        const who5 = displayName(update);
-        await sendGolden(`✅ Payout address received for <b>${who5}</b>: <code>${masked}</code>`, Number(claim.group_chat_id));
-      } catch (e) {
-        console.error("[usdt] public confirm failed:", e);
-      }
+    try {
+      const who5 = displayName(update);
+      const fallback = TG_GROUP_CHAT_ID || Number(claim?.group_chat_id || 0) || chatId;
+      await sendGolden(
+        `✅ Payout address received for <b>${who5}</b>: <code>${masked}</code>`,
+        fallback
+      );
+    } catch (e) {
+      console.error("[usdt] public confirm failed:", e);
     }
 
     return;
