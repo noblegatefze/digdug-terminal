@@ -815,7 +815,7 @@ async function handleUpdate(update: any) {
       out = out.split("\n").slice(0, 8).join("\n");
       if (out.length > 3500) out = out.slice(0, 3500) + "\n…";
 
-      const header = `<b>Digster AI</b> (v${result.build?.version ?? "?"})\n`;
+      const header = `<b>Digster AI</b>\n`;
       await sendAsk(header + escapeHtml(out), chatId);
       return;
     } catch (e: any) {
