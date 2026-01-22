@@ -8,8 +8,14 @@ function runInBackground(fn: () => Promise<void>) {
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN!;
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
+
+// Topic routing (Vercel env)
 const TG_GROUP_CHAT_ID = Number(process.env.TG_GROUP_CHAT_ID || "0");
+const TG_THREAD_WELCOME = Number(process.env.TG_THREAD_WELCOME || "0");
 const TG_THREAD_GOLDEN = Number(process.env.TG_THREAD_GOLDEN || "0");
+const TG_THREAD_STATS = Number(process.env.TG_THREAD_STATS || "0");
+const TG_THREAD_ASK = Number(process.env.TG_THREAD_ASK || "0");
+const TG_THREAD_ANNOUNCE = Number(process.env.TG_THREAD_ANNOUNCE || "0");
 
 type InlineKeyboard = { inline_keyboard: Array<Array<{ text: string; url?: string; callback_data?: string }>> };
 
@@ -83,6 +89,45 @@ async function deleteMessage(chatId: number, messageId: number) {
   }
 }
 
+// ---------- Topic routing helpers ----------
+function isDigdugGroup(chatId: number) {
+  return !!TG_GROUP_CHAT_ID && chatId === TG_GROUP_CHAT_ID;
+}
+
+async function sendToTopicThread(
+  threadId: number,
+  fallbackChatId: number,
+  text: string,
+  opts?: { replyMarkup?: InlineKeyboard }
+) {
+  if (TG_GROUP_CHAT_ID && threadId) {
+    await sendMessageThread(TG_GROUP_CHAT_ID, threadId, text, opts);
+    return;
+  }
+  await sendMessage(fallbackChatId, text, opts);
+}
+
+async function sendWelcome(text: string, fallbackChatId: number, opts?: { replyMarkup?: InlineKeyboard }) {
+  await sendToTopicThread(TG_THREAD_WELCOME, fallbackChatId, text, opts);
+}
+
+async function sendGolden(text: string, fallbackChatId: number, opts?: { replyMarkup?: InlineKeyboard }) {
+  await sendToTopicThread(TG_THREAD_GOLDEN, fallbackChatId, text, opts);
+}
+
+async function sendAsk(text: string, fallbackChatId: number, opts?: { replyMarkup?: InlineKeyboard }) {
+  await sendToTopicThread(TG_THREAD_ASK, fallbackChatId, text, opts);
+}
+
+async function sendStats(text: string, fallbackChatId: number, opts?: { replyMarkup?: InlineKeyboard }) {
+  await sendToTopicThread(TG_THREAD_STATS, fallbackChatId, text, opts);
+}
+
+async function sendAnnounce(text: string, fallbackChatId: number, opts?: { replyMarkup?: InlineKeyboard }) {
+  await sendToTopicThread(TG_THREAD_ANNOUNCE, fallbackChatId, text, opts);
+}
+
+// ---------- perms ----------
 function restrictedPerms() {
   // Most restrictive: cannot send anything
   return {
@@ -347,7 +392,8 @@ async function maybeSendGraceExpiryReminders() {
     const expiresAt = new Date(r.grace_expires_at);
     const minsLeft = Math.max(1, Math.ceil((expiresAt.getTime() - now.getTime()) / (60 * 1000)));
 
-    await sendMessage(groupChatId, reminderText(minsLeft), { replyMarkup: verifyButton() });
+    // Route reminders to Welcome topic
+    await sendWelcome(reminderText(minsLeft), groupChatId, { replyMarkup: verifyButton() });
 
     const { error: uErr } = await supabaseAdmin
       .from("dd_tg_pending_joins")
@@ -439,8 +485,9 @@ async function maybeAutoUnrestrictVerified() {
 
     if (uErr) console.error("[tg] verified update failed:", uErr);
 
+    // Route verified notice to Welcome topic (not General)
     try {
-      await sendMessage(groupChatId, `✅ Verified: <a href="tg://user?id=${tgUserId}">member</a>`);
+      await sendWelcome(`✅ Verified: <a href="tg://user?id=${tgUserId}">member</a>`, groupChatId);
     } catch { }
   }
 }
@@ -616,7 +663,8 @@ async function processJoin(groupChatId: number, user: any, source: "chat_member"
   await restrictMember(groupChatId, tgUserId);
 
   if (!alreadyWarnedRecently) {
-    await sendMessage(groupChatId, welcomeText(user?.first_name, graceMinutes), { replyMarkup: verifyButton() });
+    // Route welcome to Welcome topic
+    await sendWelcome(welcomeText(user?.first_name, graceMinutes), groupChatId, { replyMarkup: verifyButton() });
   }
 }
 
@@ -723,7 +771,7 @@ async function handleUpdate(update: any) {
       }
 
       // Scammy content + link => delete + ban
-      if ((hasLink && scam) && !allowlistedLink(t)) {
+      if (hasLink && scam && !allowlistedLink(t)) {
         await deleteMessage(chatId, Number(msg.message_id));
         await banMember(chatId, tgUserId, "scam_link");
         return;
@@ -733,21 +781,27 @@ async function handleUpdate(update: any) {
       if (verified && hasLink && !allowlistedLink(t)) {
         await deleteMessage(chatId, Number(msg.message_id));
         const who = mentionUserHtml(tgUserId, displayName(update));
+        // Keep warnings in-place (admin visibility)
         await sendMessage(chatId, `⚠️ ${who} links are restricted here. Use DIGDUG.DO links only.`);
         return;
       }
     }
   }
 
-  /** --- Existing command handlers below (unchanged) --- */
+  /** --- Command handlers --- */
 
-  // /ask
+  // /ask (routes answer into Ask topic)
   if (text === "/ask" || text.startsWith("/ask ") || text.startsWith("/ask@")) {
     const firstSpace = text.indexOf(" ");
     const qRaw = firstSpace >= 0 ? text.slice(firstSpace + 1).trim() : "";
 
     if (!qRaw) {
-      await sendMessage(chatId, "Usage: /ask your question");
+      // if asked in group, guide them to ask topic
+      if (isGroup && isDigdugGroup(chatId) && TG_THREAD_ASK) {
+        await sendMessage(chatId, "Usage: /ask your question (best used in 🤖 Ask Digster topic)");
+      } else {
+        await sendMessage(chatId, "Usage: /ask your question");
+      }
       return;
     }
 
@@ -762,29 +816,29 @@ async function handleUpdate(update: any) {
       if (out.length > 3500) out = out.slice(0, 3500) + "\n…";
 
       const header = `<b>Digster AI</b> (v${result.build?.version ?? "?"})\n`;
-      await sendMessage(chatId, header + escapeHtml(out));
+      await sendAsk(header + escapeHtml(out), chatId);
       return;
     } catch (e: any) {
-      const msg = e?.message ? String(e.message) : "Unknown error";
-      await sendMessage(chatId, `⚠️ Brain error: ${escapeHtml(msg)}`);
+      const m = e?.message ? String(e.message) : "Unknown error";
+      await sendAsk(`⚠️ Brain error: ${escapeHtml(m)}`, chatId);
       return;
     }
   }
 
-  // ✅ ADMIN /paid (GROUP ONLY)
+  // ✅ ADMIN /paid (GROUP ONLY) — already routes into Golden topic
   if (text === "/paid" || text.startsWith("/paid ")) {
-    const u = fromUser(update);
-    const tgUserId = u?.id;
-    const who = displayName(update);
-    const isGroup = chat?.type === "group" || chat?.type === "supergroup";
+    const u2 = fromUser(update);
+    const tgUserId2 = u2?.id;
+    const who2 = displayName(update);
+    const isGroup2 = chat?.type === "group" || chat?.type === "supergroup";
 
-    if (!isGroup) {
+    if (!isGroup2) {
       await sendMessage(chatId, "Usage: /paid GF-XXXX 0xTXHASH (group only)");
       return;
     }
 
-    if (!tgUserId || !isAdminUser(Number(tgUserId))) {
-      await sendMessage(chatId, `❌ ${who}: unauthorized.`);
+    if (!tgUserId2 || !isAdminUser(Number(tgUserId2))) {
+      await sendMessage(chatId, `❌ ${who2}: unauthorized.`);
       return;
     }
 
@@ -827,7 +881,7 @@ async function handleUpdate(update: any) {
 
     const { data: claimRows, error: cErr } = await supabaseAdmin
       .from("dd_tg_golden_claims")
-      .select("id, tg_user_id, group_chat_id, payout_usdt_bep20, paid_at, paid_tx_hash")
+      .select("id, tg_user_id, group_chat_id, payout_usdt_bep20")
       .eq("golden_event_id", ev.id)
       .order("claimed_at", { ascending: false })
       .limit(1);
@@ -850,7 +904,7 @@ async function handleUpdate(update: any) {
       .update({
         paid_at: nowIso,
         paid_tx_hash: txHash,
-        paid_by_tg_user_id: Number(tgUserId),
+        paid_by_tg_user_id: Number(tgUserId2),
       })
       .eq("id", claim.id);
 
@@ -872,11 +926,7 @@ async function handleUpdate(update: any) {
       `Value: $${Number(ev.usd_value).toFixed(2)}\n` +
       `TX: ${txUrl}`;
 
-    if (TG_GROUP_CHAT_ID && TG_THREAD_GOLDEN) {
-      await sendMessageThread(TG_GROUP_CHAT_ID, TG_THREAD_GOLDEN, paidMsg);
-    } else {
-      await sendMessage(chatId, paidMsg);
-    }
+    await sendGolden(paidMsg, chatId);
 
     try {
       await sendMessageChecked(Number(claim.tg_user_id), `✅ Payment sent.\n\nClaim: ${claimCode}\nTX: ${txUrl}\n\nThank you for testing DIGDUG.DO.`);
@@ -887,9 +937,9 @@ async function handleUpdate(update: any) {
 
   // /verify (DM only)
   if ((text === "/verify" || text.startsWith("/verify ")) && chat?.type === "private") {
-    const tgUserId = fromUser(update)?.id;
+    const tgUserId3 = fromUser(update)?.id;
 
-    if (!tgUserId) {
+    if (!tgUserId3) {
       await sendMessage(chatId, "Unable to identify your Telegram user.");
       return;
     }
@@ -898,7 +948,7 @@ async function handleUpdate(update: any) {
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
 
     const { error } = await supabaseAdmin.from("dd_tg_verify_codes").insert({
-      tg_user_id: tgUserId,
+      tg_user_id: tgUserId3,
       code,
       expires_at: expiresAt,
     });
@@ -927,14 +977,14 @@ Open the Terminal and type:
     return;
   }
 
-  // /claim (DM OR GROUP)
+  // /claim (DM OR GROUP) — group-side status routes to Golden topic
   if (text === "/claim" || text.startsWith("/claim ")) {
-    const u = fromUser(update);
-    const tgUserId = u?.id;
-    const who = displayName(update);
-    const isGroup = chat?.type === "group" || chat?.type === "supergroup";
+    const u4 = fromUser(update);
+    const tgUserId4 = u4?.id;
+    const who4 = displayName(update);
+    const isGroup4 = chat?.type === "group" || chat?.type === "supergroup";
 
-    if (!tgUserId) {
+    if (!tgUserId4) {
       await sendMessage(chatId, "Unable to identify your Telegram user.");
       return;
     }
@@ -947,21 +997,21 @@ Open the Terminal and type:
       return;
     }
 
-    if (isGroup) {
-      await sendMessage(chatId, `🏆 Claim attempt received: <b>${claimCode}</b> from <b>${who}</b>`);
+    if (isGroup4) {
+      await sendGolden(`🏆 Claim attempt received: <b>${claimCode}</b> from <b>${who4}</b>`, chatId);
     }
 
     const { data: links, error: linkErr } = await supabaseAdmin
       .from("dd_tg_verify_codes")
       .select("terminal_user_id")
-      .eq("tg_user_id", tgUserId)
+      .eq("tg_user_id", tgUserId4)
       .not("used_at", "is", null)
       .order("used_at", { ascending: false })
       .limit(1);
 
     if (linkErr) {
       console.error("[claim] verify lookup failed:", linkErr);
-      if (isGroup) await sendMessage(chatId, `❌ ${who}: claim failed (server error).`);
+      if (isGroup4) await sendGolden(`❌ ${who4}: claim failed (server error).`, chatId);
       else await sendMessage(chatId, "Claim failed (server error). Try again later.");
       return;
     }
@@ -969,7 +1019,7 @@ Open the Terminal and type:
     const terminalUserId = (links?.[0] as any)?.terminal_user_id;
 
     if (!terminalUserId) {
-      const msg = `Verification required.
+      const dmMsg = `Verification required.
 
 Step 1: DM @DigsterBot and type <code>/verify</code>
 Step 2: enter the code in the Terminal:
@@ -979,9 +1029,10 @@ Then retry:
 <code>/claim ${claimCode}</code>`;
 
       try {
-        await sendMessageChecked(Number(tgUserId), msg);
+        await sendMessageChecked(Number(tgUserId4), dmMsg);
       } catch {
-        await sendMessage(chatId, `⚠️ ${who}: you must verify first. DM @DigsterBot and run <code>/verify</code>.`);
+        if (isGroup4) await sendGolden(`⚠️ ${who4}: you must verify first. DM @DigsterBot and run <code>/verify</code>.`, chatId);
+        else await sendMessage(chatId, `⚠️ ${who4}: you must verify first. DM @DigsterBot and run <code>/verify</code>.`);
       }
 
       return;
@@ -995,48 +1046,53 @@ Then retry:
 
     if (evErr) {
       console.error("[claim] event lookup failed:", evErr);
-      await sendMessage(chatId, `❌ ${who}: claim failed (server error).`);
+      if (isGroup4) await sendGolden(`❌ ${who4}: claim failed (server error).`, chatId);
+      else await sendMessage(chatId, `❌ ${who4}: claim failed (server error).`);
       return;
     }
 
     const ev = evRows?.[0] as any;
     if (!ev?.id) {
-      await sendMessage(chatId, `❌ ${who}: claim code not found.`);
+      if (isGroup4) await sendGolden(`❌ ${who4}: claim code not found.`, chatId);
+      else await sendMessage(chatId, `❌ ${who4}: claim code not found.`);
       return;
     }
 
     if (String(ev.terminal_user_id) !== String(terminalUserId)) {
-      await sendMessage(chatId, `❌ ${who}: claim rejected (not your verified Terminal Pass).`);
+      if (isGroup4) await sendGolden(`❌ ${who4}: claim rejected (not your verified Terminal Pass).`, chatId);
+      else await sendMessage(chatId, `❌ ${who4}: claim rejected (not your verified Terminal Pass).`);
       return;
     }
 
     const { error: insErr } = await supabaseAdmin.from("dd_tg_golden_claims").insert({
       golden_event_id: ev.id,
-      tg_user_id: tgUserId,
+      tg_user_id: tgUserId4,
       terminal_user_id: terminalUserId,
-      group_chat_id: isGroup ? String(chatId) : null,
+      group_chat_id: isGroup4 ? String(chatId) : null,
     });
 
     if (insErr) {
       const m = String((insErr as any)?.message ?? "").toLowerCase();
       if (m.includes("duplicate") || m.includes("unique")) {
-        if (isGroup) {
+        if (isGroup4) {
           const { error: fixErr } = await supabaseAdmin
             .from("dd_tg_golden_claims")
             .update({ group_chat_id: String(chatId) })
             .eq("golden_event_id", ev.id)
-            .eq("tg_user_id", tgUserId)
+            .eq("tg_user_id", tgUserId4)
             .is("group_chat_id", null);
 
           if (fixErr) console.error("[claim] group_chat_id backfill failed:", fixErr);
         }
 
-        await sendMessage(chatId, `ℹ️ ${who}: already claimed. Check DM for payout step.`);
+        if (isGroup4) await sendGolden(`ℹ️ ${who4}: already claimed. Check DM for payout step.`, chatId);
+        else await sendMessage(chatId, `ℹ️ ${who4}: already claimed. Check DM for payout step.`);
         return;
       }
 
       console.error("[claim] insert failed:", insErr);
-      await sendMessage(chatId, `❌ ${who}: claim failed (server error).`);
+      if (isGroup4) await sendGolden(`❌ ${who4}: claim failed (server error).`, chatId);
+      else await sendMessage(chatId, `❌ ${who4}: claim failed (server error).`);
       return;
     }
 
@@ -1054,20 +1110,25 @@ Reply here with your payout address (USDT BEP-20) using:
 After payment, you will receive a receipt confirmation.`;
 
     try {
-      await sendMessageChecked(Number(tgUserId), dm);
-      await sendMessage(chatId, `✅ ${who}: claim validated. Check DM for payout step.`);
+      await sendMessageChecked(Number(tgUserId4), dm);
+      if (isGroup4) await sendGolden(`✅ ${who4}: claim validated. Check DM for payout step.`, chatId);
+      else await sendMessage(chatId, `✅ ${who4}: claim validated. Check DM for payout step.`);
     } catch {
-      await sendMessage(chatId, `✅ ${who}: claim validated, but I couldn't DM you. Please DM @DigsterBot and send <code>/start</code>, then try again.`);
+      if (isGroup4) {
+        await sendGolden(`✅ ${who4}: claim validated, but I couldn't DM you. Please DM @DigsterBot and send <code>/start</code>, then try again.`, chatId);
+      } else {
+        await sendMessage(chatId, `✅ ${who4}: claim validated, but I couldn't DM you. Please DM @DigsterBot and send <code>/start</code>, then try again.`);
+      }
     }
 
     return;
   }
 
-  // /usdt (DM only)
+  // /usdt (DM only) — group confirmation routes to Golden topic
   if ((text === "/usdt" || text.startsWith("/usdt ")) && chat?.type === "private") {
-    const tgUserId = fromUser(update)?.id;
+    const tgUserId5 = fromUser(update)?.id;
 
-    if (!tgUserId) {
+    if (!tgUserId5) {
       await sendMessage(chatId, "Unable to identify your Telegram user.");
       return;
     }
@@ -1083,7 +1144,7 @@ After payment, you will receive a receipt confirmation.`;
     const { data: claims, error: cErr } = await supabaseAdmin
       .from("dd_tg_golden_claims")
       .select("id, claimed_at, group_chat_id, golden_event_id")
-      .eq("tg_user_id", tgUserId)
+      .eq("tg_user_id", tgUserId5)
       .order("claimed_at", { ascending: false })
       .limit(1);
 
@@ -1113,8 +1174,8 @@ After payment, you will receive a receipt confirmation.`;
 
     if (claim?.group_chat_id) {
       try {
-        const who = displayName(update);
-        await sendMessage(Number(claim.group_chat_id), `✅ Payout address received for <b>${who}</b>: <code>${masked}</code>`);
+        const who5 = displayName(update);
+        await sendGolden(`✅ Payout address received for <b>${who5}</b>: <code>${masked}</code>`, Number(claim.group_chat_id));
       } catch (e) {
         console.error("[usdt] public confirm failed:", e);
       }
@@ -1156,23 +1217,25 @@ Group:
   if (text === "/ping" || text.startsWith("/ping@")) {
     const type = chat?.type ?? "unknown";
     const title = chat?.title ? ` • ${chat.title}` : "";
-    await sendMessage(
-      chatId,
-      `Digster online${title}\nchat_type=${type}\nTG_GROUP_CHAT_ID=${TG_GROUP_CHAT_ID}\nTG_THREAD_GOLDEN=${TG_THREAD_GOLDEN}`
-    );
+    await sendMessage(chatId, `Digster online${title}\nchat_type=${type}`);
     return;
   }
 
-  // /chatid
+  // /chatid (reply in same topic if thread exists)
   if (text === "/chatid" || text.startsWith("/chatid@")) {
     const type = chat?.type ?? "unknown";
     const title = chat?.title ? `\ntitle=${chat.title}` : "";
-    const msg = getMsg(update);
-    const threadId = msg?.message_thread_id ?? null;
+    const m = getMsg(update);
+    const threadId = m?.message_thread_id ?? null;
     const threadLine = threadId ? `\nmessage_thread_id=${threadId}` : "";
-    await sendMessage(chatId, `chat_id=${chatId}\nchat_type=${type}${title}${threadLine}`);
+    const out = `chat_id=${chatId}\nchat_type=${type}${title}${threadLine}`;
+
+    if (threadId) await sendMessageThread(chatId, threadId, out);
+    else await sendMessage(chatId, out);
+
     return;
   }
 
+  // (stats/announce hooks can be added later; helpers are ready: sendStats(), sendAnnounce())
   return;
 }
