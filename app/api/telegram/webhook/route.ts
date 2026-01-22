@@ -1156,7 +1156,10 @@ Group:
   if (text === "/ping" || text.startsWith("/ping@")) {
     const type = chat?.type ?? "unknown";
     const title = chat?.title ? ` • ${chat.title}` : "";
-    await sendMessage(chatId, `Digster online${title}\nchat_type=${type}`);
+    await sendMessage(
+      chatId,
+      `Digster online${title}\nchat_type=${type}\nTG_GROUP_CHAT_ID=${TG_GROUP_CHAT_ID}\nTG_THREAD_GOLDEN=${TG_THREAD_GOLDEN}`
+    );
     return;
   }
 
