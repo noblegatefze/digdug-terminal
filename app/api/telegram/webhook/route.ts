@@ -1111,8 +1111,8 @@ After payment, you will receive a receipt confirmation.`;
 
     try {
       await sendMessageChecked(Number(tgUserId4), dm);
-      if (isGroup4) await sendGolden(`✅ ${who4}: claim validated. Check DM for payout step.`, chatId);
-      else await sendMessage(chatId, `✅ ${who4}: claim validated. Check DM for payout step.`);
+      const fallback = TG_GROUP_CHAT_ID || chatId;
+      await sendGolden(`✅ ${who4}: claim validated. Check DM for payout step.`, fallback);
     } catch {
       if (isGroup4) {
         await sendGolden(`✅ ${who4}: claim validated, but I couldn't DM you. Please DM @DigsterBot and send <code>/start</code>, then try again.`, chatId);
