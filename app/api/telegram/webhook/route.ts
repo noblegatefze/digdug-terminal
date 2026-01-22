@@ -8,6 +8,8 @@ function runInBackground(fn: () => Promise<void>) {
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN!;
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
+const TG_GROUP_CHAT_ID = Number(process.env.TG_GROUP_CHAT_ID || "0");
+const TG_THREAD_GOLDEN = Number(process.env.TG_THREAD_GOLDEN || "0");
 
 type InlineKeyboard = { inline_keyboard: Array<Array<{ text: string; url?: string; callback_data?: string }>> };
 
@@ -861,16 +863,20 @@ async function handleUpdate(update: any) {
     const winnerLabel = await lookupTgUserLabel(Number(claim.tg_user_id));
     const maskedAddr = claim.payout_usdt_bep20 ? maskEvmAddress(String(claim.payout_usdt_bep20)) : "N/A";
 
-    await sendMessage(
-      chatId,
+    const paidMsg =
       `✅ <b>PAID</b>\n` +
       `Claim: <b>${claimCode}</b>\n` +
       `Winner: <b>${winnerLabel}</b>\n` +
       `Payout: <code>${maskedAddr}</code>\n` +
       `Token: ${ev.token} (${ev.chain})\n` +
       `Value: $${Number(ev.usd_value).toFixed(2)}\n` +
-      `TX: ${txUrl}`
-    );
+      `TX: ${txUrl}`;
+
+    if (TG_GROUP_CHAT_ID && TG_THREAD_GOLDEN) {
+      await sendMessageThread(TG_GROUP_CHAT_ID, TG_THREAD_GOLDEN, paidMsg);
+    } else {
+      await sendMessage(chatId, paidMsg);
+    }
 
     try {
       await sendMessageChecked(Number(claim.tg_user_id), `✅ Payment sent.\n\nClaim: ${claimCode}\nTX: ${txUrl}\n\nThank you for testing DIGDUG.DO.`);
