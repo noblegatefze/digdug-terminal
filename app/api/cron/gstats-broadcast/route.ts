@@ -141,7 +141,7 @@ export async function GET() {
   const rewardEfficiency = act?.model?.reward_efficiency_usd_per_usddd ?? null;
 
   // golden/today shape may vary; try common keys
-  const goldenToday = Number((gold as any)?.today ?? (gold as any)?.golden_today ?? null);
+  const goldenToday = Number((gold as any)?.count ?? (gold as any)?.today ?? (gold as any)?.golden_today ?? null);
   const goldenCap = Number((gold as any)?.cap ?? (gold as any)?.golden_cap ?? null);
   const resetInFromApi = (gold as any)?.reset_in ?? (gold as any)?.golden_reset_in ?? null;
   const goldenResetIn =
