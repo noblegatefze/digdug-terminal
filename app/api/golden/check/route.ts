@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import crypto from "crypto";
 
 function reqEnv(name: string) {
   const v = process.env[name];
@@ -20,6 +21,8 @@ const DAILY_CAP = 5;
 
 // Hard floor so it can’t rapid-fire even if lots of users dig
 const MIN_GAP_FLOOR_SECONDS = 2 * 60 * 60; // 2 hours
+
+const GAP_JITTER_MAX_SECONDS = 60 * 60; // +0–60 min unpredictability (server-side)
 
 function todayUTCDateString(): string {
   return new Date().toISOString().slice(0, 10);
@@ -112,7 +115,8 @@ export async function POST(req: Request) {
     // Conservative baseline: 24h/5 * 0.6 ≈ 2.88h, floored at 2h.
     const msLeft = msUntilNextUtcReset(new Date());
     const baselineGap = Math.floor((msLeft / 1000) / DAILY_CAP * 0.6);
-    const minGapSeconds = Math.max(MIN_GAP_FLOOR_SECONDS, baselineGap);
+    const jitterExtraSeconds = crypto.randomInt(0, GAP_JITTER_MAX_SECONDS + 1);
+    const minGapSeconds = Math.max(MIN_GAP_FLOOR_SECONDS, baselineGap) + jitterExtraSeconds;
 
     // 1) Atomically take a paced daily slot
     type GoldenSlot = { allowed: boolean; new_count: number; next_allowed_at: string | null };
@@ -134,7 +138,6 @@ export async function POST(req: Request) {
         ok: true,
         golden: false,
         reason: "paced_or_capped",
-        next_allowed_at: slot?.next_allowed_at ?? null,
       });
     }
 
@@ -250,8 +253,8 @@ export async function POST(req: Request) {
       broadcast: out,
       pacing: {
         min_gap_seconds: minGapSeconds,
-        next_allowed_at: slot?.next_allowed_at ?? null,
       },
+
     });
   } catch (e: any) {
     console.error("[golden] unexpected:", e);
