@@ -1395,7 +1395,7 @@ export default function Page() {
     if (!id) return null;
     return campaignsRef.current.find((c) => c.id === id) ?? null;
   };
-  const availableBalance = (c: Campaign) => Math.max(0, c.onChainBalance - c.claimedUnwithdrawn);
+  const availableBalance = (c: Campaign) => Math.max(0, c.onChainBalance);
 
   /** --- Claim ledger helpers --- **/
   const recomputeTreasureBalancesForUser = (username: string | null, allClaims: TreasureClaim[]) => {
