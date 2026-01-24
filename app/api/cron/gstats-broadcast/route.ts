@@ -32,6 +32,17 @@ async function safeJson<T>(r: Response): Promise<T | null> {
   return (await r.json().catch(() => null)) as T | null;
 }
 
+function utcResetInHMS(now = new Date()): string {
+  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
+  const diffMs = Math.max(0, next.getTime() - now.getTime());
+  const totalSec = Math.floor(diffMs / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  const pad = (x: number) => String(x).padStart(2, "0");
+  return `${pad(h)}:${pad(m)}:${pad(s)}`;
+}
+
 function buildTgMessage(p: {
   versionLine: string;
   sessions24h: number | null;
@@ -132,7 +143,11 @@ export async function GET() {
   // golden/today shape may vary; try common keys
   const goldenToday = Number((gold as any)?.today ?? (gold as any)?.golden_today ?? null);
   const goldenCap = Number((gold as any)?.cap ?? (gold as any)?.golden_cap ?? null);
-  const goldenResetIn = String((gold as any)?.reset_in ?? (gold as any)?.golden_reset_in ?? "N/A");
+  const resetInFromApi = (gold as any)?.reset_in ?? (gold as any)?.golden_reset_in ?? null;
+  const goldenResetIn =
+    typeof resetInFromApi === "string" && resetInFromApi.trim() && resetInFromApi.trim().toUpperCase() !== "N/A"
+      ? resetInFromApi.trim()
+      : utcResetInHMS();
 
   // winners endpoint: support either {rows:[...]} or direct array
   const winnersArr: GoldenWinnersRow[] = Array.isArray(winnersRaw)
