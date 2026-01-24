@@ -1,82 +1,94 @@
 import { NextResponse } from "next/server";
 
-function reqEnv(name: string) {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing env: ${name}`);
-  return v;
+function fmtInt(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "N/A";
+  return Math.round(n).toLocaleString("en-US");
 }
 
-function asciiGstatsMessage(data: any) {
-  const attempts = Number(data?.digs_attempted ?? 0);
-  const finds = Number(data?.digs_succeeded ?? 0);
-  const rejected = Math.max(0, attempts - finds);
-  const rate = attempts > 0 ? (finds / attempts) * 100 : 0;
+function fmtNum(n: number | null | undefined, dp = 2): string {
+  if (n == null || !Number.isFinite(n)) return "N/A";
+  return n.toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp });
+}
 
-  const usdddSpent = data?.usddd_spent != null ? Number(data.usddd_spent) : null;
-  const withdrawals = data?.withdrawals ?? "N/A";
+function maskName(s: string): string {
+  const x = String(s ?? "").trim();
+  if (!x) return "anon";
+  if (x.length <= 3) return `${x[0]}…`;
+  // keep first char and last char, hide middle
+  return `${x[0]}…${x[x.length - 1]}`;
+}
 
-  const totalSessions = data?.total_sessions ?? "N/A";
-  const activeNow = data?.active_now_5m ?? "N/A";
-  const dailyActive = data?.daily_active ?? "N/A";
+type BuildMeta = { version?: string; build?: string };
+type Activity24h = {
+  counts?: { sessions_24h?: number; protocol_actions?: number; claims_executed?: number };
+  money?: { usddd_spent?: number; claims_value_usd?: number };
+  model?: { reward_efficiency_usd_per_usddd?: number };
+};
+type GoldenToday = { today?: number; cap?: number; reset_in?: string } | any;
+type GoldenWinnersRow = { username?: string; total_usd?: number } | any;
 
-  const boxesCreated = data?.boxes_created ?? null;
-  const boxesLiveNow = data?.boxes_live_now ?? null;
+async function safeJson<T>(r: Response): Promise<T | null> {
+  if (!r.ok) return null;
+  return (await r.json().catch(() => null)) as T | null;
+}
 
-  // ✅ Golden Find stats (from /api/stats/summary)
-  // UI POLICY (v0.1.17.0): NEVER broadcast window state or "next window" hints.
-  const goldenToday = Number(data?.golden_today ?? 0);
-  const goldenCap = Number(data?.golden_cap ?? 5);
-  const goldenResetIn = String(data?.golden_reset_in ?? "N/A");
-
+function buildTgMessage(p: {
+  versionLine: string;
+  sessions24h: number | null;
+  protocolActions24h: number | null;
+  successfulFinds24h: number | null;
+  goldenToday: number | null;
+  goldenCap: number | null;
+  goldenResetIn: string | null;
+  usdddUtilized24h: number | null;
+  valueDistributed24h: number | null;
+  rewardEfficiency: number | null;
+  winners: { username: string; usd: number }[];
+}) {
   const lines: string[] = [];
+
   lines.push("DIGDUG.DO — GLOBAL PULSE (6H)");
+  lines.push(p.versionLine);
   lines.push("");
 
   lines.push("NETWORK");
-  lines.push(`- Sessions: ${totalSessions}`);
-  lines.push(`- Active now (5m): ${activeNow}`);
-  lines.push(`- Daily diggers (today): ${dailyActive}`);
+  lines.push(`• Sessions (24h): ${fmtInt(p.sessions24h)}`);
+  lines.push(`• Protocol actions (24h): ${fmtInt(p.protocolActions24h)}`);
   lines.push("");
 
-  lines.push("DIGGING");
-  lines.push(`- Attempts: ${attempts}`);
-  lines.push(`- Finds: ${finds}`);
-  lines.push(`- Find rate: ${rate.toFixed(2)}%`);
-  if (rejected > 0) lines.push(`- Rejected: ${rejected}`);
+  lines.push("DIGGING (24h)");
+  lines.push(`• Successful finds: ${fmtInt(p.successfulFinds24h)}`);
   lines.push("");
 
-  // ✅ Golden section (anti-gaming safe subset)
   lines.push("GOLDEN FINDS");
-  lines.push(`- Today: ${goldenToday}/${goldenCap}`);
-  lines.push(`- UTC reset in: ${goldenResetIn}`);
+  lines.push(`• Today: ${p.goldenToday == null ? "N/A" : p.goldenToday}/${p.goldenCap ?? "N/A"}`);
+  lines.push(`• UTC reset in: ${p.goldenResetIn ?? "N/A"}`);
   lines.push("");
 
-  lines.push("FUEL");
-  lines.push(`- USDDD spent: ${usdddSpent == null ? "N/A" : usdddSpent.toFixed(2)}`);
-  if (usdddSpent != null) {
-    const avg = attempts > 0 ? usdddSpent / attempts : 0;
-    lines.push(`- Avg fuel/attempt: ${avg.toFixed(2)}`);
-  }
-  lines.push(`- Withdrawals: ${withdrawals}`);
+  lines.push("VALUE FLOW (24h)");
+  lines.push(`• USDDD utilized: ${fmtNum(p.usdddUtilized24h, 2)}`);
+  lines.push(`• Value distributed: $${fmtNum(p.valueDistributed24h, 2)}`);
+  lines.push(`• Reward efficiency: $${fmtNum(p.rewardEfficiency, 2)} / USDDD`);
+  lines.push("");
 
-  if (boxesCreated != null || boxesLiveNow != null) {
-    lines.push("");
-    lines.push("BOXES");
-    if (boxesCreated != null) lines.push(`- Created: ${boxesCreated}`);
-    if (boxesLiveNow != null) lines.push(`- Live now: ${boxesLiveNow}`);
-  }
-
-  // optional: top boxes
-  if (Array.isArray(data?.top_boxes) && data.top_boxes.length > 0) {
-    lines.push("");
-    lines.push("TOP BOXES (by digs)");
-    data.top_boxes.slice(0, 5).forEach((b: any, i: number) => {
-      const bid = b?.box_id ?? "?";
-      const ch = b?.chain ?? "?";
-      const digs = b?.digs ?? "?";
-      lines.push(`${i + 1}) ${bid} (${ch}) — ${digs} digs`);
+  lines.push("TOP GOLDEN WINNERS (30d)");
+  if (p.winners.length === 0) {
+    lines.push("1) N/A");
+    lines.push("2) N/A");
+    lines.push("3) N/A");
+  } else {
+    p.winners.slice(0, 3).forEach((w, i) => {
+      lines.push(`${i + 1}) ${maskName(w.username)} — $${fmtNum(w.usd, 2)}`);
     });
+    // ensure 3 lines always
+    for (let i = p.winners.length; i < 3; i++) lines.push(`${i + 1}) N/A`);
   }
+
+  lines.push("");
+  lines.push("⛏️ Digging is live. Boxes refill, rewards reset daily.");
+  lines.push("");
+  lines.push("Live metrics: usddd.digdug.do");
+  lines.push("Dig now: digdug.do");
 
   return lines.join("\n");
 }
@@ -87,18 +99,72 @@ export async function GET() {
     return NextResponse.json({ ok: false, error: "ADMIN_API_KEY not set" }, { status: 500 });
   }
 
-  // 1) Fetch stats from internal endpoint
   const base = process.env.NEXT_PUBLIC_SITE_URL || "https://digdug.do";
 
-  const r = await fetch(`${base}/api/stats/summary`, { method: "GET" });
-  if (!r.ok) {
-    return NextResponse.json({ ok: false, error: `stats_http_${r.status}` }, { status: 500 });
-  }
-  const data = await r.json();
+  // Canonical metrics surface
+  const scanBase = "https://usddd.digdug.do";
 
-  const message = asciiGstatsMessage(data);
+  // Fetch all (fail-safe: any can be null)
+  const [metaR, actR, goldR, winnersR] = await Promise.all([
+    fetch(`${scanBase}/api/meta/build`, { method: "GET", cache: "no-store" }),
+    fetch(`${scanBase}/api/activity/24h`, { method: "GET", cache: "no-store" }),
+    fetch(`${scanBase}/api/golden/today`, { method: "GET", cache: "no-store" }),
+    fetch(`${scanBase}/api/leaderboards/golden-winners`, { method: "GET", cache: "no-store" }),
+  ]);
 
-  // 2) Broadcast to supergroup/group only (safe)
+  const meta = await safeJson<BuildMeta>(metaR);
+  const act = await safeJson<Activity24h>(actR);
+  const gold = await safeJson<GoldenToday>(goldR);
+  const winnersRaw = await safeJson<any>(winnersR);
+
+  const version = meta?.version ? String(meta.version) : "v?.?.?.?";
+  const build = meta?.build ? String(meta.build) : "unknown";
+  const versionLine = `Version ${version} • LIVE (${build})`;
+
+  const sessions24h = act?.counts?.sessions_24h ?? null;
+  const protocolActions24h = act?.counts?.protocol_actions ?? null;
+  const successfulFinds24h = act?.counts?.claims_executed ?? null;
+
+  const usdddUtilized24h = act?.money?.usddd_spent ?? null;
+  const valueDistributed24h = act?.money?.claims_value_usd ?? null;
+  const rewardEfficiency = act?.model?.reward_efficiency_usd_per_usddd ?? null;
+
+  // golden/today shape may vary; try common keys
+  const goldenToday = Number((gold as any)?.today ?? (gold as any)?.golden_today ?? null);
+  const goldenCap = Number((gold as any)?.cap ?? (gold as any)?.golden_cap ?? null);
+  const goldenResetIn = String((gold as any)?.reset_in ?? (gold as any)?.golden_reset_in ?? "N/A");
+
+  // winners endpoint: support either {rows:[...]} or direct array
+  const winnersArr: GoldenWinnersRow[] = Array.isArray(winnersRaw)
+    ? winnersRaw
+    : Array.isArray(winnersRaw?.rows)
+      ? winnersRaw.rows
+      : Array.isArray(winnersRaw?.data)
+        ? winnersRaw.data
+        : [];
+
+  const winners = winnersArr
+    .map((r) => ({
+      username: String((r as any)?.username ?? (r as any)?.terminal_username ?? "anon"),
+      usd: Number((r as any)?.total_usd ?? (r as any)?.usd_total ?? (r as any)?.amount_usd ?? 0) || 0,
+    }))
+    .filter((x) => x.usd > 0);
+
+  const message = buildTgMessage({
+    versionLine,
+    sessions24h,
+    protocolActions24h,
+    successfulFinds24h,
+    goldenToday: Number.isFinite(goldenToday) ? goldenToday : null,
+    goldenCap: Number.isFinite(goldenCap) ? goldenCap : null,
+    goldenResetIn: goldenResetIn || "N/A",
+    usdddUtilized24h,
+    valueDistributed24h,
+    rewardEfficiency,
+    winners,
+  });
+
+  // Broadcast to group/supergroup
   const br = await fetch(`${base}/api/admin/telegram/broadcast`, {
     method: "POST",
     headers: {
