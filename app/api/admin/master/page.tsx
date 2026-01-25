@@ -104,7 +104,7 @@ export default function MasterAdminPage() {
 
       {authed && flags && (
         <div style={{ marginTop: 20 }}>
-          {/* Operator Guide */}
+          {/* Operator Guide (Simple) */}
           <div
             style={{
               border: "1px solid #333",
@@ -114,71 +114,73 @@ export default function MasterAdminPage() {
               marginBottom: 16,
             }}
           >
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>Operator Guide</div>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>
+              Quick Guide (Simple)
+            </div>
 
             <div style={{ fontSize: 13, lineHeight: 1.5, opacity: 0.92 }}>
               <div style={{ marginBottom: 10 }}>
-                <b>Rule #1:</b> Toggles do nothing until you press <b>Save</b>.
+                <b>Important:</b> Changes only apply after you press <b>Save</b>.
                 <br />
-                <b>Rule #2:</b> If you’re unsure, use <b>Panic: Pause Everything</b> first, then diagnose.
+                <b>If you’re unsure:</b> click <b>Panic: Pause Everything</b>, then deal with the issue calmly.
               </div>
 
               <div style={{ marginBottom: 10 }}>
-                <b>What each switch does:</b>
+                <b>What the switches mean:</b>
                 <ul style={{ margin: "8px 0 0 18px" }}>
                   <li>
-                    <b>PAUSE_ALL</b> — Stops core protocol actions everywhere. Use when something is clearly wrong and you need a full stop.
-                    {pill(flags.pause_all, "Full stop")}
+                    <b>PAUSE_ALL</b> — Stops the whole app. People cannot dig or claim.
+                    {pill(flags.pause_all, "Stops everything")}
                     <br />
                     <span style={{ opacity: 0.85 }}>
-                      Safe: Yes (best first move). Risk: users can’t perform actions while ON.
+                      Use this when things look broken, you see bot activity, or Supabase is struggling.
                     </span>
                   </li>
+
                   <li style={{ marginTop: 8 }}>
-                    <b>PAUSE_RESERVE</b> — Stops <b>reserve/spend writes</b> (prevents USDDD consumption & box draining). Use if “USDDD Utilized” spikes,
-                    or you suspect automated digging/reserving.
-                    {pill(flags.pause_reserve, "Stops reserves")}
+                    <b>PAUSE_RESERVE</b> — Stops rewards/claims from being reserved (stops spending and box draining).
+                    {pill(flags.pause_reserve, "Stops rewards/claims")}
                     <br />
                     <span style={{ opacity: 0.85 }}>
-                      Safe: Yes. Risk: legitimate digs won’t reserve rewards while ON.
+                      Use this when “USDDD Utilized” or box activity spikes. Safe “money protection” switch.
                     </span>
                   </li>
+
                   <li style={{ marginTop: 8 }}>
-                    <b>PAUSE_STATS_INGEST</b> — Stops <b>stats_events</b> writes (prevents metric spam / Scan inflation). Use if Scan numbers climb unnaturally
-                    but you want to keep reserves live.
+                    <b>PAUSE_STATS_INGEST</b> — Stops stats from being written (stops metric spam).
                     {pill(flags.pause_stats_ingest, "Stops stats")}
                     <br />
                     <span style={{ opacity: 0.85 }}>
-                      Safe: Yes. Risk: dashboards/scan analytics may go quiet while ON.
+                      Use this when Scan numbers are being spammed or Supabase Disk IO is high.
                     </span>
                   </li>
                 </ul>
               </div>
 
               <div style={{ marginBottom: 10 }}>
-                <b>Quick decision flow:</b>
+                <b>What to press (fast):</b>
                 <ol style={{ margin: "8px 0 0 18px" }}>
                   <li>
-                    <b>Everything looks wrong / you’re under attack:</b> Click <b>Panic: Pause Everything</b> → <b>Save</b>.
+                    <b>Everything looks wrong:</b> Press <b>Panic: Pause Everything</b> → <b>Save</b>.
                   </li>
                   <li style={{ marginTop: 6 }}>
-                    <b>Scan “USDDD Utilized (24h)” climbing fast:</b> Turn ON <b>PAUSE_RESERVE</b> → <b>Save</b>.
+                    <b>Money/boxes moving too fast:</b> Turn ON <b>PAUSE_RESERVE</b> → <b>Save</b>.
                   </li>
                   <li style={{ marginTop: 6 }}>
-                    <b>Only Scan/metrics are being spammed:</b> Turn ON <b>PAUSE_STATS_INGEST</b> → <b>Save</b>.
+                    <b>Only stats are noisy:</b> Turn ON <b>PAUSE_STATS_INGEST</b> → <b>Save</b>.
                   </li>
                   <li style={{ marginTop: 6 }}>
-                    <b>Recover safely:</b> Turn OFF <b>PAUSE_ALL</b> first (if it was on), then OFF the specific pause you used → <b>Save</b>.
+                    <b>When it’s calm again:</b> Turn things OFF and press <b>Save</b>.
                   </li>
                 </ol>
               </div>
 
               <div style={{ opacity: 0.85 }}>
-                <b>Tip:</b> Use the sections below to verify the situation is calming down:
+                <b>How to check if it worked:</b>
                 <br />
-                - “Stats Events (last 10 minutes)” should drop toward zero when PAUSE_STATS_INGEST is ON.
+                - “Stats Events (last 10 minutes)” should go quiet when PAUSE_STATS_INGEST is ON.
                 <br />
-                - “Top installs (dig_success)” shows the worst offenders (useful for later banning/rate limiting).
+                - If something spikes again, pause first, then investigate.
               </div>
             </div>
           </div>
@@ -207,7 +209,9 @@ export default function MasterAdminPage() {
               <input
                 type="checkbox"
                 checked={flags.pause_stats_ingest}
-                onChange={(e) => setFlags({ ...flags, pause_stats_ingest: e.target.checked })}
+                onChange={(e) =>
+                  setFlags({ ...flags, pause_stats_ingest: e.target.checked })
+                }
               />{" "}
               PAUSE_STATS_INGEST
             </label>
