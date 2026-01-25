@@ -25,7 +25,7 @@ type Activity24h = {
   model?: { reward_efficiency_usd_per_usddd?: number };
 };
 type GoldenToday = { today?: number; cap?: number; reset_in?: string } | any;
-type GoldenWinnersRow = { username?: string; total_usd?: number } | any;
+type GoldenWinnersRow = { winner?: string; usd_total?: number; total_usd?: number } | any;
 
 async function safeJson<T>(r: Response): Promise<T | null> {
   if (!r.ok) return null;
@@ -54,7 +54,7 @@ function buildTgMessage(p: {
   usdddUtilized24h: number | null;
   valueDistributed24h: number | null;
   rewardEfficiency: number | null;
-  winners: { username: string; usd: number }[];
+  winners: { winner: string; usd: number }[];
 }) {
   const lines: string[] = [];
 
@@ -89,7 +89,8 @@ function buildTgMessage(p: {
     lines.push("3) N/A");
   } else {
     p.winners.slice(0, 3).forEach((w, i) => {
-      lines.push(`${i + 1}) ${maskName(w.username)} — $${fmtNum(w.usd, 2)}`);
+      // IMPORTANT: do not re-mask; winner is already Scan-format
+      lines.push(`${i + 1}) ${w.winner} â€” $${fmtNum(w.usd, 2)}`);
     });
     // ensure 3 lines always
     for (let i = p.winners.length; i < 3; i++) lines.push(`${i + 1}) N/A`);
@@ -160,8 +161,9 @@ export async function GET() {
 
   const winners = winnersArr
     .map((r) => ({
-      username: String((r as any)?.username ?? (r as any)?.terminal_username ?? "anon"),
-      usd: Number((r as any)?.total_usd ?? (r as any)?.usd_total ?? (r as any)?.amount_usd ?? 0) || 0,
+      // IMPORTANT: match Scan exactly (Scan renders `winner` directly)
+      winner: String((r as any)?.winner ?? "anon"),
+      usd: Number((r as any)?.usd_total ?? (r as any)?.total_usd ?? (r as any)?.amount_usd ?? 0) || 0,
     }))
     .filter((x) => x.usd > 0);
 
