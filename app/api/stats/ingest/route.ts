@@ -22,10 +22,11 @@ function toNum(v: any): number | null {
 }
 
 // Server-side admin flags (DB-controlled pause)
-const adminSupabase = createClient(
-  env("SUPABASE_URL"),
-  env("SUPABASE_SERVICE_ROLE_KEY")
-);
+const adminSupabase = createClient(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY"));
+
+// Soft global throttle for dig_success (prevents utilization explosions)
+const DIG_SUCCESS_CAP_PER_MIN = Number(process.env.DIG_SUCCESS_CAP_PER_MIN ?? "600"); // tune on Vercel
+const DIG_SUCCESS_WINDOW_SEC = 60;
 
 async function isStatsPaused(): Promise<boolean> {
   const { data } = await adminSupabase
@@ -37,22 +38,33 @@ async function isStatsPaused(): Promise<boolean> {
   return Boolean(data?.pause_all || data?.pause_stats_ingest);
 }
 
+async function digSuccessSaturated(): Promise<boolean> {
+  if (!Number.isFinite(DIG_SUCCESS_CAP_PER_MIN) || DIG_SUCCESS_CAP_PER_MIN <= 0) return false;
+
+  const sinceIso = new Date(Date.now() - DIG_SUCCESS_WINDOW_SEC * 1000).toISOString();
+
+  const { count, error } = await adminSupabase
+    .from("stats_events")
+    .select("id", { count: "exact", head: true })
+    .eq("event", "dig_success")
+    .gte("created_at", sinceIso);
+
+  // fail-open: don't break gameplay if counting fails
+  if (error) return false;
+
+  return (count ?? 0) >= DIG_SUCCESS_CAP_PER_MIN;
+}
+
 export async function POST(req: Request) {
   try {
     // DB pause (preferred)
     if (await isStatsPaused()) {
-      return NextResponse.json(
-        { ok: false, error: "stats_ingest_paused" },
-        { status: 503 }
-      );
+      return NextResponse.json({ ok: false, error: "stats_ingest_paused" }, { status: 503 });
     }
 
     // Hard kill-switch (optional backup)
     if (process.env.DIGDUG_PAUSE === "1") {
-      return NextResponse.json(
-        { ok: false, error: "protocol_paused" },
-        { status: 503 }
-      );
+      return NextResponse.json({ ok: false, error: "protocol_paused" }, { status: 503 });
     }
 
     const url = env("SUPABASE_URL");
@@ -71,6 +83,13 @@ export async function POST(req: Request) {
     }
     if (!event || !ALLOWED_EVENTS.has(event)) {
       return NextResponse.json({ ok: false, error: "invalid event" }, { status: 400 });
+    }
+
+    // Soft global throttle (return 200 to avoid client retry storms)
+    if (event === "dig_success") {
+      if (await digSuccessSaturated()) {
+        return NextResponse.json({ ok: true, throttled: true });
+      }
     }
 
     // TRUST FRONTEND SNAPSHOT (Phase Zero rule)
@@ -112,9 +131,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true });
   } catch (e: any) {
-    return NextResponse.json(
-      { ok: false, error: e?.message ?? "server_error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: e?.message ?? "server_error" }, { status: 500 });
   }
 }
