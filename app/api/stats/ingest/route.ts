@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 
 const ALLOWED_EVENTS = new Set([
   "session_start",
@@ -20,16 +21,40 @@ function toNum(v: any): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-export async function POST(req: Request) {
-  // EMERGENCY PAUSE: stop stats ingest writes (bot kill-switch)
-  if (process.env.DIGDUG_PAUSE === "1") {
-    return NextResponse.json(
-      { ok: false, error: "Protocol temporarily paused." },
-      { status: 503 }
-    );
-  }
+// Server-side admin flags (DB-controlled pause)
+const adminSupabase = createClient(
+  env("SUPABASE_URL"),
+  env("SUPABASE_SERVICE_ROLE_KEY")
+);
 
+async function isStatsPaused(): Promise<boolean> {
+  const { data } = await adminSupabase
+    .from("dd_admin_flags")
+    .select("pause_all, pause_stats_ingest")
+    .eq("id", true)
+    .single();
+
+  return Boolean(data?.pause_all || data?.pause_stats_ingest);
+}
+
+export async function POST(req: Request) {
   try {
+    // DB pause (preferred)
+    if (await isStatsPaused()) {
+      return NextResponse.json(
+        { ok: false, error: "stats_ingest_paused" },
+        { status: 503 }
+      );
+    }
+
+    // Hard kill-switch (optional backup)
+    if (process.env.DIGDUG_PAUSE === "1") {
+      return NextResponse.json(
+        { ok: false, error: "protocol_paused" },
+        { status: 503 }
+      );
+    }
+
     const url = env("SUPABASE_URL");
     const key = env("SUPABASE_SERVICE_ROLE_KEY");
 
@@ -38,8 +63,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Invalid JSON" }, { status: 400 });
     }
 
-    const install_id = String(body.install_id ?? "").trim();
-    const event = String(body.event ?? "").trim();
+    const install_id = String((body as any).install_id ?? "").trim();
+    const event = String((body as any).event ?? "").trim();
 
     if (!install_id || install_id.length < 8) {
       return NextResponse.json({ ok: false, error: "install_id required" }, { status: 400 });
@@ -49,17 +74,17 @@ export async function POST(req: Request) {
     }
 
     // TRUST FRONTEND SNAPSHOT (Phase Zero rule)
-    const rewardAmount = toNum(body.reward_amount);
-    const rewardPriceUsd = toNum(body.reward_price_usd);
-    const rewardValueUsd = toNum(body.reward_value_usd);
+    const rewardAmount = toNum((body as any).reward_amount);
+    const rewardPriceUsd = toNum((body as any).reward_price_usd);
+    const rewardValueUsd = toNum((body as any).reward_value_usd);
 
     const payload = {
       install_id,
       event,
-      box_id: body.box_id ?? null,
-      chain: body.chain ?? null,
-      token_symbol: body.token_symbol ?? null,
-      usddd_cost: toNum(body.usddd_cost),
+      box_id: (body as any).box_id ?? null,
+      chain: (body as any).chain ?? null,
+      token_symbol: (body as any).token_symbol ?? null,
+      usddd_cost: toNum((body as any).usddd_cost),
       reward_amount: rewardAmount,
       priced: rewardValueUsd != null,
       reward_price_usd: rewardPriceUsd,
