@@ -2196,6 +2196,12 @@ export default function Page() {
         ? clamp(usdValue / rewardAmt, 0.000001, 1000)
         : null;
 
+    // EMERGENCY PAUSE: stop all spend/reserve actions (bot kill-switch)
+    if (process.env.NEXT_PUBLIC_DIGDUG_PAUSE === "1") {
+      emit("sys", "Maintenance in progress. Please try again shortly.");
+      return;
+    }
+
     // reserve globally in DB ledger (authoritative; idempotent by digId)
     if (authedUser) {
       try {
