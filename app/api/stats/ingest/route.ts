@@ -21,6 +21,14 @@ function toNum(v: any): number | null {
 }
 
 export async function POST(req: Request) {
+  // EMERGENCY PAUSE: stop stats ingest writes (bot kill-switch)
+  if (process.env.DIGDUG_PAUSE === "1") {
+    return NextResponse.json(
+      { ok: false, error: "Protocol temporarily paused." },
+      { status: 503 }
+    );
+  }
+
   try {
     const url = env("SUPABASE_URL");
     const key = env("SUPABASE_SERVICE_ROLE_KEY");
