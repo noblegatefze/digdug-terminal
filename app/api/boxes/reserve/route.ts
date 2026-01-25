@@ -56,6 +56,14 @@ async function fetchCmcUsdPrice(cmcId: number): Promise<number | null> {
 }
 
 export async function POST(req: NextRequest) {
+  // EMERGENCY PAUSE: stop all reserve/spend writes (bot kill-switch)
+  if (process.env.DIGDUG_PAUSE === "1") {
+    return NextResponse.json(
+      { ok: false, error: "Protocol temporarily paused." },
+      { status: 503 }
+    );
+  }
+
   const body = await req.json().catch(() => null);
 
   const username = String(body?.username ?? "").trim();
