@@ -9,6 +9,16 @@ function env(name: string) {
 
 const supabase = createClient(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY"));
 
+async function isReservePaused() {
+  const { data } = await supabase
+    .from("dd_admin_flags")
+    .select("pause_all, pause_reserve")
+    .eq("id", true)
+    .single();
+
+  return Boolean(data?.pause_all || data?.pause_reserve);
+}
+
 function asNum(v: any): number | null {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
@@ -60,6 +70,14 @@ export async function POST(req: NextRequest) {
   if (process.env.DIGDUG_PAUSE === "1") {
     return NextResponse.json(
       { ok: false, error: "Protocol temporarily paused." },
+      { status: 503 }
+    );
+  }
+
+  // ADMIN PANEL PAUSE (DB flags)
+  if (await isReservePaused()) {
+    return NextResponse.json(
+      { ok: false, error: "reserve_paused" },
       { status: 503 }
     );
   }
