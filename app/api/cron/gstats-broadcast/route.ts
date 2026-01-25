@@ -90,7 +90,7 @@ function buildTgMessage(p: {
   } else {
     p.winners.slice(0, 3).forEach((w, i) => {
       // IMPORTANT: do not re-mask; winner is already Scan-format
-      lines.push(`${i + 1}) ${w.winner} â€” $${fmtNum(w.usd, 2)}`);
+      lines.push(`${i + 1}) ${w.winner} ... $${fmtNum(w.usd, 2)}`);
     });
     // ensure 3 lines always
     for (let i = p.winners.length; i < 3; i++) lines.push(`${i + 1}) N/A`);
