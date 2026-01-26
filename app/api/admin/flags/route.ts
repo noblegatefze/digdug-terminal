@@ -16,13 +16,9 @@ function isAuthed(req: NextRequest) {
 export async function GET(req: NextRequest) {
   if (!isAuthed(req)) return NextResponse.json({ ok: false }, { status: 401 });
 
-  const { data, error } = await supabase
-    .from("dd_admin_flags")
-    .select("pause_all,pause_reserve,pause_stats_ingest,updated_at,updated_by")
-    .eq("id", true)
-    .single();
-
+  const { data, error } = await supabase.rpc("rpc_admin_flags").single();
   if (error || !data) return NextResponse.json({ ok: false, error: "read_failed" }, { status: 500 });
+
   return NextResponse.json({ ok: true, flags: data });
 }
 
@@ -42,5 +38,9 @@ export async function POST(req: NextRequest) {
   const { error } = await supabase.from("dd_admin_flags").update(patch).eq("id", true);
   if (error) return NextResponse.json({ ok: false, error: "write_failed" }, { status: 500 });
 
-  return NextResponse.json({ ok: true });
+  // return canonical flags (RPC) after write
+  const { data, error: readErr } = await supabase.rpc("rpc_admin_flags").single();
+  if (readErr || !data) return NextResponse.json({ ok: false, error: "read_failed" }, { status: 500 });
+
+  return NextResponse.json({ ok: true, flags: data });
 }
