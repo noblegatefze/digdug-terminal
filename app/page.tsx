@@ -273,7 +273,7 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.2.0.2";
+const BUILD_VERSION = "Zero Phase v0.2.0.3";
 const BUILD_HASH = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local";
 const STORAGE_KEY_BUILD = "dd_build_v1";
 
@@ -3019,7 +3019,7 @@ export default function Page() {
     // nuke (admin-only)
     if (low === "nuke" || low === "wipe") {
       if (!requireAdminUser()) return;
-      emit("warn", "âš ï¸  DEV COMMAND: NUKE (erases local state)");
+      emit("warn", "⚠️ DEV COMMAND: NUKE (erases local state)");
       emit("info", `Type ${C("YES")} to confirm or ${C("NO")} to cancel.`);
       setPrompt({ mode: "CONFIRM_NUKE" });
       return;
@@ -3076,7 +3076,7 @@ export default function Page() {
             return;
           }
 
-          emit("ok", `Telegram verification linked âœ… (${G(data.code)})`);
+          emit("ok", `Telegram verification linked ✅ (${G(data.code)})`);
           emit("sys", `tg_user_id=${data.tg_user_id}`);
           return;
         } catch (e: any) {
@@ -4181,7 +4181,7 @@ export default function Page() {
           <div className="dd-drawer-left">
             <div className="dd-drawer-title">
               <button type="button" className={`dd-gear ${toolboxOpen ? "is-on" : ""}`} onClick={() => setToolboxOpen((v2) => !v2)} aria-label="Toolbox" title="Toolbox">
-                âš™
+                ⚙️
               </button>
               <span>CONTROLS</span>
             </div>
@@ -4235,7 +4235,7 @@ export default function Page() {
           className="dd-command-input"
           value={cmd}
           onChange={(e) => setCmd(e.target.value)}
-          placeholder={prompt.mode === "IDLE" ? "Type a command- (dig, create box, bind token, deposit, configure)" : "Reply here- (type cancel to abort)"}
+          placeholder={prompt.mode === "IDLE" ? "Type a command - (dig, create box, bind token, deposit, configure)" : "Reply here- (type cancel to abort)"}
           autoCapitalize="none"
           autoCorrect="off"
           autoComplete="off"
