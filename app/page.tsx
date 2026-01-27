@@ -273,7 +273,7 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.2.0.4";
+const BUILD_VERSION = "Zero Phase v0.2.0.5";
 const BUILD_HASH = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local";
 const STORAGE_KEY_BUILD = "dd_build_v1";
 
@@ -512,6 +512,38 @@ function loadFuelState(username: string | null): FuelState | null {
     return null;
   }
 }
+
+// --- Golden eligibility (Option A): only pick tokens that have box inventory > 0 ---
+type GoldenEligibleRow = { symbol: string; remaining: number };
+
+async function pickEligibleGoldenTokenSymbol(): Promise<string | null> {
+  try {
+    const r = await fetch("https://usddd.digdug.do/api/boxes/balances", { cache: "no-store" });
+    if (!r.ok) return null;
+
+    const json = await r.json();
+
+    // Accept either:
+    // 1) an array: [{ symbol, remaining }, ...]
+    // 2) an object with .boxes: [{ symbol, remaining }, ...]
+    const rows: any[] = Array.isArray(json) ? json : Array.isArray(json?.boxes) ? json.boxes : [];
+
+    const eligible: GoldenEligibleRow[] = rows
+      .map((x) => ({
+        symbol: String(x?.symbol ?? x?.token ?? "").toUpperCase(),
+        remaining: Number(x?.remaining ?? x?.balance ?? 0),
+      }))
+      .filter((x) => x.symbol && Number.isFinite(x.remaining) && x.remaining > 0);
+
+    if (eligible.length === 0) return null;
+
+    const pick = eligible[Math.floor(Math.random() * eligible.length)];
+    return pick.symbol;
+  } catch {
+    return null;
+  }
+}
+
 
 function saveFuelState(username: string | null, state: FuelState) {
   if (!username) return;
@@ -2312,7 +2344,7 @@ export default function Page() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           usd_value: 5 + Math.random() * 15,  // Golden Find attempt value ($5—$20)
-          token: sym,                     // token symbol
+          token: (await pickEligibleGoldenTokenSymbol()) ?? sym, // prefer eligible tokens with inventory
           chain: campaign.deployChainId,  // ETH/BNB/SOL/ARB/BASE
           username: authedUser,
         }),
