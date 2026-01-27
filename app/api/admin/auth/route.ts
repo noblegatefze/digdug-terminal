@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 
 function env(name: string) {
   const v = process.env[name];
@@ -30,9 +30,10 @@ export async function POST(req: NextRequest) {
   res.cookies.set("dd_admin", token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: true,
+    secure: process.env.NODE_ENV === "production",
     path: "/",
     maxAge: 60 * 60 * 12, // 12h
   });
   return res;
 }
+
