@@ -273,7 +273,7 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.2.0.3";
+const BUILD_VERSION = "Zero Phase v0.2.0.4";
 const BUILD_HASH = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local";
 const STORAGE_KEY_BUILD = "dd_build_v1";
 
@@ -2906,7 +2906,7 @@ export default function Page() {
     if (!v) return;
     const low = v.toLowerCase();
 
-    if (paused && !["help","status","build","docs"].includes(low)) {
+    if (paused && !["help", "status", "build", "docs"].includes(low)) {
       emit("warn", "⛔ Terminal is paused (maintenance). Read-only mode.");
       return;
     }
@@ -3634,15 +3634,14 @@ export default function Page() {
             return;
           }
 
-          const allocated = Number(json.usddd?.allocated ?? 0);
-          const acquired = Number(json.usddd?.acquired ?? 0);
-          const treasury = Number(json.usddd?.treasury ?? 0);
+          // IMPORTANT: Acquire should NOT overwrite allocated/treasury.
+          // Allocated is impacted by DIG spend locally; server may not reflect that.
+          const acquired = Number(json.usddd?.acquired ?? usdddAcquiredRef.current);
           const acquiredTotal = Number(json.usddd?.acquiredTotal ?? 0);
           const credit = Number(json.credit ?? amt);
 
-          if (Number.isFinite(allocated)) setUsdddAllocated(allocated);
           if (Number.isFinite(acquired)) setUsdddAcquired(acquired);
-          if (Number.isFinite(treasury)) setTreasuryUSDDD(treasury);
+          // keep allocated + treasury as-is
 
           emit("ok", `Acquired confirmed: +${(Number.isFinite(credit) ? credit : amt).toFixed(2)} USDDD (Acquired).`);
           emit("sys", `Acquired total: ${(Number.isFinite(acquiredTotal) ? acquiredTotal : 0).toFixed(2)} / ${ACQUIRE_CAP}`);
