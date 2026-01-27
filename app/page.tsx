@@ -273,7 +273,7 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.2.0.5";
+const BUILD_VERSION = "Zero Phase v0.2.0.6";
 const BUILD_HASH = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local";
 const STORAGE_KEY_BUILD = "dd_build_v1";
 
@@ -886,6 +886,9 @@ export default function Page() {
   const sponsorActiveBoxIdRef = useRef<string | null>(sponsorActiveBoxId);
   const claimsRef = useRef(claims);
   const digGateRef = useRef(digGate);
+  // Golden entropy gate (client-side, reduces predictability + reduces request spam)
+  const goldenEntropyRef = useRef(0);
+  const goldenThresholdRef = useRef(0.9 + Math.random() * 0.6); // 0.9–1.5
 
   useEffect(() => void (campaignsRef.current = campaigns), [campaigns]);
   useEffect(() => void (usdddAllocatedRef.current = usdddAllocated), [usdddAllocated]);
@@ -2337,29 +2340,36 @@ export default function Page() {
       reward_value_usd: usdValue,
     });
 
-    // Golden Find trigger (server-decided; Terminal only speaks if TG broadcast actually sent)
-    try {
-      fetch("/api/golden/check", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          usd_value: 5 + Math.random() * 15,  // Golden Find attempt value ($5—$20)
-          token: (await pickEligibleGoldenTokenSymbol()) ?? sym, // prefer eligible tokens with inventory
-          chain: campaign.deployChainId,  // ETH/BNB/SOL/ARB/BASE
-          username: authedUser,
-        }),
-      })
-        .then((r) => r.json().catch(() => null))
-        .then((out) => {
-          if (out?.ok && out?.golden && out?.broadcast_sent === true && typeof out?.broadcast_message === "string") {
-            // broadcast_message already contains the "GOLDEN FIND" header
-            emit("sys", out.broadcast_message);
-            emit("sys", "Claim code is in Telegram: https://t.me/digdugdo");
-          }
+    // client-side entropy gate: makes Golden timing feel more random and reduces request spam
+    goldenEntropyRef.current += 0.2 + Math.random() * 0.25; // ~0.20–0.45 per dig
+
+    if (goldenEntropyRef.current >= goldenThresholdRef.current) {
+      goldenEntropyRef.current = 0;
+      goldenThresholdRef.current = 0.9 + Math.random() * 0.6; // reroll next threshold
+
+      try {
+        fetch("/api/golden/check", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            usd_value: 5 + Math.random() * 15,  // Golden Find attempt value ($5—$20)
+            token: (await pickEligibleGoldenTokenSymbol()) ?? sym, // prefer eligible tokens with inventory
+            chain: campaign.deployChainId,  // ETH/BNB/SOL/ARB/BASE
+            username: authedUser,
+          }),
         })
-        .catch(() => { });
-    } catch {
-      // ignore
+          .then((r) => r.json().catch(() => null))
+          .then((out) => {
+            if (out?.ok && out?.golden && out?.broadcast_sent === true && typeof out?.broadcast_message === "string") {
+              // broadcast_message already contains the "GOLDEN FIND" header
+              emit("sys", out.broadcast_message);
+              emit("sys", "Claim code is in Telegram: https://t.me/digdugdo");
+            }
+          })
+          .catch(() => { });
+      } catch {
+        // ignore
+      }
     }
 
     // ALWAYS show normal dig result (this was missing)
