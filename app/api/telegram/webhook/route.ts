@@ -1255,20 +1255,24 @@ After payment, you will receive a receipt confirmation.`;
     await sendMessage(
       chatId,
       `Hi — I'm Digster 🤖
-I'm here to help you use DIGDUG.DO safely.
+I help you use DIGDUG.DO safely.
 
-Quick commands (DM):
-/verify        Link your Telegram to your Terminal
-/recover       Recover your Terminal Pass
-/claim GF-XXXX Claim a Golden Find
-/usdt 0xADDRESS Set your payout address (USDT BEP-20)
-/ask           Ask Digster for help
+Daily:
+/verify   Link Telegram
+/claim    Claim Golden Find
+/usdt     Set payout address
+/ask      Ask Digster
+
+Emergency:
+/recover  Reset Terminal Pass
 
 Group:
-/claim GF-XXXX (public validation)
-/ask           Ask DigsterAI
+/claim    Public validation
+/ask      Ask DigsterAI
 
-Tip: Your Terminal Pass is private — never share it with anyone.`
+Tip:
+Never share your Terminal Pass.`
+
     );
     return;
   }
@@ -1278,17 +1282,24 @@ Tip: Your Terminal Pass is private — never share it with anyone.`
     await sendMessage(
       chatId,
       `Hi — I'm Digster 🤖
+I help you use DIGDUG.DO safely.
 
-DM:
-/verify        Link your Telegram to your Terminal
-/recover       Recover your Terminal Pass
-/claim GF-XXXX Claim a Golden Find
-/usdt 0xADDRESS Set your payout address (USDT BEP-20)
-/ask           Ask Digster for help
+Daily:
+/verify   Link Telegram
+/claim    Claim Golden Find
+/usdt     Set payout address
+/ask      Ask Digster
+
+Emergency:
+/recover  Reset Terminal Pass
 
 Group:
-/claim GF-XXXX (public validation)
-/ask           Ask DigsterAI`
+/claim    Public validation
+/ask      Ask DigsterAI
+
+Tip:
+Never share your Terminal Pass.`
+
 
     );
     return;
