@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { askBrain } from "@/lib/brain/answer";
+import crypto from "crypto";
 
 function runInBackground(fn: () => Promise<void>) {
   fn().catch((e) => console.error("[tg] background error:", e));
@@ -589,6 +590,8 @@ function isCommandAllowlisted(text: string): boolean {
     "/chatid@digsterbot",
     "/help",
     "/start",
+    "/recover",
+    "/recover@digsterbot",
   ]);
   return ok.has(cmd);
 }
@@ -974,6 +977,67 @@ Open the Terminal and type:
 <code>verify ${code}</code>`
     );
 
+    return;
+  }
+
+  // /recover (DM only) — reset Terminal Pass for already-verified TG users
+  if ((text === "/recover" || text.startsWith("/recover ")) && chat?.type === "private") {
+    const tgUserIdR = fromUser(update)?.id;
+    if (!tgUserIdR) {
+      await sendMessage(chatId, "Unable to identify your Telegram user.");
+      return;
+    }
+
+    // Must already be verified (linked to a terminal_user_id)
+    const { data: links, error: linkErr } = await supabaseAdmin
+      .from("dd_tg_verify_codes")
+      .select("terminal_user_id, used_at")
+      .eq("tg_user_id", Number(tgUserIdR))
+      .not("used_at", "is", null)
+      .order("used_at", { ascending: false })
+      .limit(1);
+
+    if (linkErr) {
+      console.error("[recover] verify lookup failed:", linkErr);
+      await sendMessage(chatId, "Could not start recovery (server error). Try again later.");
+      return;
+    }
+
+    const terminalUserId = (links?.[0] as any)?.terminal_user_id;
+    if (!terminalUserId) {
+      await sendMessage(
+        chatId,
+        `You need to verify first.\n\nStep 1: DM @DigsterBot and type <code>/verify</code>\nStep 2: enter the code in the Terminal:\n<code>verify DG-XXXX</code>`
+      );
+      return;
+    }
+
+    // Generate a new pass (simple, user-friendly)
+    const newPass = (() => {
+      const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+      let out = "";
+      for (let i = 0; i < 12; i++) out += chars[Math.floor(Math.random() * chars.length)];
+      return out.slice(0, 4) + "-" + out.slice(4, 8) + "-" + out.slice(8, 12);
+    })();
+
+    // Hash with the same method as /api/auth/login (sha256 hex)
+    const passHash = crypto.createHash("sha256").update(String(newPass)).digest("hex");
+
+    const { error: upErr } = await supabaseAdmin
+      .from("dd_terminal_users")
+      .update({ pass_hash: passHash })
+      .eq("id", String(terminalUserId));
+
+    if (upErr) {
+      console.error("[recover] pass_hash update failed:", upErr);
+      await sendMessage(chatId, "Could not complete recovery (server error). Try again later.");
+      return;
+    }
+
+    await sendMessage(
+      chatId,
+      `✅ Terminal Pass reset\n\nYour new Terminal Pass:\n<code>${newPass}</code>\n\nSave it now. Never share it.`
+    );
     return;
   }
 
