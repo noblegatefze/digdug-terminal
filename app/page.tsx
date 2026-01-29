@@ -272,7 +272,7 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.2.0.12";
+const BUILD_VERSION = "Zero Phase v0.2.0.13";
 const BUILD_HASH = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local";
 const STORAGE_KEY_BUILD = "dd_build_v1";
 
@@ -746,6 +746,60 @@ function findTier(c: Campaign, rewardAmt: number) {
   if (p < 0.7) return "MEDIUM FIND";
   if (p < 0.92) return "HIGH FIND";
   return "MEGA FIND";
+}
+
+function findTierByUsd(realUsd: number) {
+  if (realUsd < 1) return "BASE FIND";
+  if (realUsd < 4) return "LOW FIND";
+  if (realUsd < 10) return "MEDIUM FIND";
+  if (realUsd < 25) return "HIGH FIND";
+  return "MEGA FIND";
+}
+
+// ---- CMC price cache (client-side, 2h TTL) ----
+type PriceCacheHit = { price: number | null; at: number };
+
+const PRICE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+const PRICE_CACHE_KEY = "dd_price_cache_v1";
+
+function loadPriceCache(): Record<string, PriceCacheHit> {
+  try {
+    return JSON.parse(localStorage.getItem(PRICE_CACHE_KEY) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
+function savePriceCache(cache: Record<string, PriceCacheHit>) {
+  try {
+    localStorage.setItem(PRICE_CACHE_KEY, JSON.stringify(cache));
+  } catch { }
+}
+
+async function getCmcPriceUsdCached(cmcId: number): Promise<number | null> {
+  if (!Number.isFinite(cmcId) || cmcId <= 0) return null;
+
+  const key = String(cmcId);
+  const now = Date.now();
+  const cache = loadPriceCache();
+  const hit = cache[key];
+
+  if (hit && (now - hit.at) < PRICE_TTL_MS) {
+    return hit.price;
+  }
+
+  const r = await fetch(`/api/pricing/cmc?cmc_id=${encodeURIComponent(key)}`, {
+    cache: "no-store",
+  })
+    .then(res => (res.ok ? res.json() : null))
+    .catch(() => null);
+
+  const price = typeof r?.price === "number" ? r.price : null;
+
+  cache[key] = { price, at: now };
+  savePriceCache(cache);
+
+  return price;
 }
 
 /** --- Wallet registry helpers --- **/
@@ -2265,17 +2319,15 @@ export default function Page() {
     const boxBefore = availableBalance(campaign);
     const rewardAmt = computeReward(campaign);
     const sym = campaign.tokenSymbol ?? "TOKEN";
-    const tier = findTier(campaign, rewardAmt);
+    let tier = findTier(campaign, rewardAmt); // fallback if no price
     const digId = uid("dig");
 
-    // cost-anchored USD value (mock economics)
-    const usdValue = sampleUsdTarget(campaign.costUSDDD);
+    // real USD price from CMC (cached)
+    const cmcId = Number((campaign as any)?.meta?.cmc_id ?? 0);
+    const usdPrice = cmcId ? await getCmcPriceUsdCached(cmcId) : null;
 
-    // derived snapshot price for this dig
-    const usdPrice =
-      rewardAmt > 0
-        ? clamp(usdValue / rewardAmt, 0.000001, 1000)
-        : null;
+    const realUsd = usdPrice != null ? (rewardAmt * usdPrice) : null;
+    if (realUsd != null) tier = findTierByUsd(realUsd);
 
     // EMERGENCY PAUSE: stop all spend/reserve actions (bot kill-switch)
     if (process.env.NEXT_PUBLIC_DIGDUG_PAUSE === "1") {
@@ -2356,7 +2408,8 @@ export default function Page() {
       rewardAmount: rewardAmt,
       rewardMode: campaign.rewardMode,
       rewardUsdPrice: usdPrice,
-      rewardUsdValue: usdValue,
+      rewardUsdValue: realUsd,
+
     };
     setDigHistory((h) => [...h, record]);
 
@@ -2420,7 +2473,6 @@ export default function Page() {
 
     // keep UI line “(~$X)” but make it honest
     try {
-      const realUsd = usdPrice != null ? (rewardAmt * usdPrice) : null;
       if (realUsd != null) emit("ok", `${tier} - +${rewardAmt.toFixed(6)} ${sym} (~$${fmtUsdValue(realUsd)})`);
       else emit("ok", `${tier} - +${rewardAmt.toFixed(6)} ${sym}`);
     } catch {
