@@ -2360,14 +2360,13 @@ export default function Page() {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                terminal_user_id: terminalUserId,
+                user_id: terminalUserId,
                 username: uname,
                 usddd_allocated: usdddAllocatedRef.current,
                 usddd_acquired: usdddAcquiredRef.current,
-                fuel_used_delta: Number(campaign.costUSDDD ?? 0),
-                digs_delta: 1,
-                finds_delta: 1, // keep as 1 for now (success == find in current UI)
+                treasury_delta: Number(campaign.costUSDDD ?? 0),
               }),
+
             }).catch(() => { });
           })
           .catch(() => { });
