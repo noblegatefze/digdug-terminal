@@ -2349,6 +2349,10 @@ export default function Page() {
       rewardUsdValue: usdValue,
     };
     setDigHistory((h) => [...h, record]);
+
+    // keep ref in sync so `status` shows correct Digs immediately
+    digHistoryRef.current = [...digHistoryRef.current, record] as any;
+
     // UI polish (v0.2.0.11): update finds immediately; DB remains authoritative on refresh
     if (rewardAmt > 0) {
       findsCountRef.current = (Number.isFinite(findsCountRef.current) ? findsCountRef.current : 0) + 1;
