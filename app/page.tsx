@@ -914,12 +914,12 @@ export default function Page() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
+          ...payload,
           install_id: installId,
           event,
           ts: Date.now(),
           session_id: sessionId,
           username: authedUser ?? null,
-          ...payload,
         }),
       }).catch(() => { });
     } catch {
