@@ -59,23 +59,6 @@ async function isStatsPaused(): Promise<boolean> {
   return Boolean(data?.pause_all || data?.pause_stats_ingest);
 }
 
-async function digSuccessSaturated(): Promise<boolean> {
-  if (!Number.isFinite(DIG_SUCCESS_CAP_PER_MIN) || DIG_SUCCESS_CAP_PER_MIN <= 0) return false;
-
-  const sinceIso = new Date(Date.now() - DIG_SUCCESS_WINDOW_SEC * 1000).toISOString();
-
-  const { count, error } = await adminSupabase
-    .from("stats_events")
-    .select("id", { count: "exact", head: true })
-    .eq("event", "dig_success")
-    .gte("created_at", sinceIso);
-
-  // fail-open: don't break gameplay if counting fails
-  if (error) return false;
-
-  return (count ?? 0) >= DIG_SUCCESS_CAP_PER_MIN;
-}
-
 export async function POST(req: Request) {
   try {
     // DB pause (preferred)
@@ -107,13 +90,6 @@ export async function POST(req: Request) {
     }
     if (!event || !ALLOWED_EVENTS.has(event)) {
       return NextResponse.json({ ok: false, error: "invalid event" }, { status: 400 });
-    }
-
-    // Soft global throttle (return 200 to avoid client retry storms)
-    if (event === "dig_success") {
-      if (await digSuccessSaturated()) {
-        return NextResponse.json({ ok: true, throttled: true });
-      }
     }
 
     // Create supabase client only after basic validation
