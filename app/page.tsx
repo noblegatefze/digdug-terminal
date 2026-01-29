@@ -272,7 +272,7 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.2.0.11";
+const BUILD_VERSION = "Zero Phase v0.2.0.12";
 const BUILD_HASH = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local";
 const STORAGE_KEY_BUILD = "dd_build_v1";
 
@@ -2380,7 +2380,7 @@ export default function Page() {
       reward_amount: rewardAmt,
       priced: usdPrice != null,
       reward_price_usd: usdPrice,
-      reward_value_usd: usdValue,
+      reward_value_usd: usdPrice != null ? (rewardAmt * usdPrice) : null,
     });
 
 
@@ -2418,12 +2418,13 @@ export default function Page() {
       }
     }
 
-    // ALWAYS show normal dig result (this was missing)
+    // keep UI line “(~$X)” but make it honest
     try {
-      if (usdValue != null) emit("ok", `${tier} - +${rewardAmt.toFixed(6)} ${sym} (~$${fmtUsdValue(usdValue)})`);
+      const realUsd = usdPrice != null ? (rewardAmt * usdPrice) : null;
+      if (realUsd != null) emit("ok", `${tier} - +${rewardAmt.toFixed(6)} ${sym} (~$${fmtUsdValue(realUsd)})`);
       else emit("ok", `${tier} - +${rewardAmt.toFixed(6)} ${sym}`);
     } catch {
-      emit("ok", `${tier} - +${rewardAmt.toFixed(6)} ${sym}`);
+      // ignore
     }
 
     emit("sys", `Fuel remaining: ${usdddTotalRef.current.toFixed(2)} USDDD`);
