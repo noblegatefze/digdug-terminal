@@ -2370,6 +2370,7 @@ export default function Page() {
     }
 
     sendStat("dig_success", {
+      terminal_user_id: authedUser?.id ?? null,
       box_id: campaign.id,
       chain: campaign.deployChainId,
       token_symbol: sym,

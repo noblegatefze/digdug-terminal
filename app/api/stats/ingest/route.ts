@@ -121,8 +121,11 @@ export async function POST(req: Request) {
       auth: { persistSession: false },
     });
 
-    // Resolve terminal_user_id (non-blocking: may be null if username missing/unknown)
-    const terminal_user_id = await resolveTerminalUserId(supabase, username);
+    // Prefer explicit terminal_user_id from client (no lookup), fallback to username resolution
+    const terminal_user_id =
+      (body as any).terminal_user_id
+        ? String((body as any).terminal_user_id)
+        : await resolveTerminalUserId(supabase, username);
 
     // TRUST FRONTEND SNAPSHOT (Phase Zero rule)
     const rewardAmount = toNum((body as any).reward_amount);
