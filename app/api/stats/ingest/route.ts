@@ -1,6 +1,27 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
+async function resolveTerminalUserId(supabase: any, username?: string | null): Promise<string | null> {
+  try {
+    if (!username) return null;
+
+    const { data, error } = await supabase
+      .from("dd_terminal_users")
+      .select("id")
+      .eq("username", username)
+      .limit(1)
+      .single();
+
+    if (error) return null;
+
+    // data shape depends on Supabase typings; treat safely
+    const id = (data as any)?.id;
+    return id ? String(id) : null;
+  } catch {
+    return null;
+  }
+}
+
 const ALLOWED_EVENTS = new Set([
   "session_start",
   "dig_attempt",
@@ -75,6 +96,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Invalid JSON" }, { status: 400 });
     }
 
+    const username =
+      typeof (body as any)?.username === "string" ? String((body as any).username).trim() : null;
+
     const install_id = String((body as any).install_id ?? "").trim();
     const event = String((body as any).event ?? "").trim();
 
@@ -92,6 +116,14 @@ export async function POST(req: Request) {
       }
     }
 
+    // Create supabase client only after basic validation
+    const supabase = createClient(url, key, {
+      auth: { persistSession: false },
+    });
+
+    // Resolve terminal_user_id (non-blocking: may be null if username missing/unknown)
+    const terminal_user_id = await resolveTerminalUserId(supabase, username);
+
     // TRUST FRONTEND SNAPSHOT (Phase Zero rule)
     const rewardAmount = toNum((body as any).reward_amount);
     const rewardPriceUsd = toNum((body as any).reward_price_usd);
@@ -99,6 +131,7 @@ export async function POST(req: Request) {
 
     const payload = {
       install_id,
+      terminal_user_id,
       event,
       box_id: (body as any).box_id ?? null,
       chain: (body as any).chain ?? null,
@@ -108,6 +141,9 @@ export async function POST(req: Request) {
       priced: rewardValueUsd != null,
       reward_price_usd: rewardPriceUsd,
       reward_value_usd: rewardValueUsd,
+      // Optional meta (safe to ignore server-side)
+      session_id: (body as any).session_id ?? null,
+      ts: (body as any).ts ?? null,
     };
 
     const r = await fetch(`${url}/rest/v1/stats_events`, {
