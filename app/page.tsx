@@ -909,10 +909,10 @@ export default function Page() {
   };
 
 
-  const sendStat = (event: string, payload?: Record<string, any>) => {
-    // fire-and-forget; never block gameplay
+  const sendStat = async (event: string, payload?: Record<string, any>) => {
+    // best-effort; caller may await for DB consistency
     try {
-      fetch("/api/stats/ingest", {
+      return await fetch("/api/stats/ingest", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -923,9 +923,9 @@ export default function Page() {
           session_id: sessionId,
           username: authedUser ?? null,
         }),
-      }).catch(() => { });
+      });
     } catch {
-      // ignore
+      return null;
     }
   };
 
@@ -2369,7 +2369,7 @@ export default function Page() {
       findsCountRef.current = (Number.isFinite(findsCountRef.current) ? findsCountRef.current : 0) + 1;
     }
 
-    sendStat("dig_success", {
+    await sendStat("dig_success", {
       terminal_user_id: authedUser ?? null,
       box_id: campaign.id,
       chain: campaign.deployChainId,
@@ -2380,6 +2380,7 @@ export default function Page() {
       reward_price_usd: usdPrice,
       reward_value_usd: usdValue,
     });
+
 
     // NOTE (v0.2.0.11): dd_user_state is DB-authoritative via stats ingest RPC; no client snapshot writes here.
 
