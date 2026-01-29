@@ -20,18 +20,18 @@ function normalizeUsername(u: string) {
 
 /**
  * POST /api/user/state
- * Body:
- * {
- *   username: string
- * }
+ * Body: { username: string }
  *
- * Returns canonical USDDD state from DB (read-only) + admin flags.
+ * Returns:
+ * - admin flags
+ * - terminal user id
+ * - persistent user state from dd_user_state (if present, else zeros)
+ *
+ * NOTE: This is READ-ONLY. No writes here.
  */
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json().catch(() => null)) as null | {
-      username?: string;
-    };
+    const body = (await req.json().catch(() => null)) as null | { username?: string };
 
     const usernameRaw = body?.username;
     if (!usernameRaw || typeof usernameRaw !== "string") {
@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
       pause_stats_ingest: Boolean((flagsRow as any)?.pause_stats_ingest),
     };
 
-    // 1) Resolve user_id from dd_terminal_users
+    // 1) Resolve terminal_user_id from dd_terminal_users
     const { data: user, error: userErr } = await supabase
       .from("dd_terminal_users")
       .select("id, username")
@@ -72,13 +72,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "user_not_found" }, { status: 404 });
     }
 
-    const userId = user.id as string;
+    const terminal_user_id = String(user.id);
 
-    // 2) Read canonical state (read-only; do NOT upsert/create here)
+    // 2) Read persistent state (NEW schema)
     const { data: state, error: stateErr } = await supabase
       .from("dd_user_state")
-      .select("user_id, usddd_allocated, usddd_acquired, treasury_usddd, acquired_total, updated_at")
-      .eq("user_id", userId)
+      .select("terminal_user_id, username, usddd_allocated, usddd_acquired, fuel_used, digs, finds, updated_at")
+      .eq("terminal_user_id", terminal_user_id)
       .maybeSingle();
 
     if (stateErr) {
@@ -90,20 +90,26 @@ export async function POST(req: NextRequest) {
 
     const allocated = Number((state as any)?.usddd_allocated ?? 0);
     const acquired = Number((state as any)?.usddd_acquired ?? 0);
-    const treasury = Number((state as any)?.treasury_usddd ?? 0);
-    const acquiredTotal = Number((state as any)?.acquired_total ?? 0);
+    const fuelUsed = Number((state as any)?.fuel_used ?? 0);
+    const digs = Number((state as any)?.digs ?? 0);
+    const finds = Number((state as any)?.finds ?? 0);
     const updatedAt = (state as any)?.updated_at ?? null;
 
+    // Keep response shape compatible with current Terminal expectations:
+    // - "treasury" will now mean Fuel Used (we will rename label in UI next step)
     return NextResponse.json({
       ok: true,
       flags,
-      user: { id: userId, username: user.username },
+      user: { id: terminal_user_id, username: user.username },
       usddd: {
         allocated,
         acquired,
-        treasury,
+        treasury: fuelUsed,
         total: allocated + acquired,
-        acquiredTotal,
+      },
+      counters: {
+        digs,
+        finds,
       },
       updatedAt,
     });
