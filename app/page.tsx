@@ -30,7 +30,6 @@ type PromptMode =
   | "IDLE"
   | "HELP_SELECT"
   | "DOCS_SELECT"
-  | "CONFIRM_NUKE"
   | "REG_USER"
   | "REG_PASS"
   | "LOGIN_USER"
@@ -2002,7 +2001,6 @@ export default function Page() {
     emit("info", "ADMIN COMMANDS");
     emit("sys", "");
     emit("sys", `${C("gstats")}   ${C("stats")}`);
-    emit("sys", `${C("nuke")}     ${C("reset")}`);
   };
 
   const printConsoleStatus = (m: ConsoleMode) => {
@@ -2351,6 +2349,10 @@ export default function Page() {
       rewardUsdValue: usdValue,
     };
     setDigHistory((h) => [...h, record]);
+    // UI polish (v0.2.0.11): update finds immediately; DB remains authoritative on refresh
+    if (rewardAmt > 0) {
+      findsCountRef.current = (Number.isFinite(findsCountRef.current) ? findsCountRef.current : 0) + 1;
+    }
 
     sendStat("dig_success", {
       box_id: campaign.id,
@@ -2363,38 +2365,7 @@ export default function Page() {
       reward_value_usd: usdValue,
     });
 
-    // persist user state snapshot (non-blocking)
-    try {
-      const uname = authedUser ?? null;
-      if (uname) {
-        fetch("/api/user/state", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username: uname }),
-        })
-          .then((r) => r.json().catch(() => null))
-          .then((j) => {
-            const terminalUserId = j?.user?.id ? String(j.user.id) : null;
-            if (!terminalUserId) return;
-
-            fetch("/api/user/state/upsert", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                user_id: terminalUserId,
-                username: uname,
-                usddd_allocated: usdddAllocatedRef.current,
-                usddd_acquired: usdddAcquiredRef.current,
-                treasury_delta: Number(campaign.costUSDDD ?? 0),
-              }),
-
-            }).catch(() => { });
-          })
-          .catch(() => { });
-      }
-    } catch {
-      // never block gameplay
-    }
+    // NOTE (v0.2.0.11): dd_user_state is DB-authoritative via stats ingest RPC; no client snapshot writes here.
 
     // client-side entropy gate: makes Golden timing feel more random and reduces request spam
     goldenEntropyRef.current += 0.2 + Math.random() * 0.25; // ~0.20–0.45 per dig
@@ -2944,34 +2915,6 @@ export default function Page() {
     emit("ok", "ADMIN: FULL RESET COMPLETE");
   };
 
-  const nukeLocalState = () => {
-    try {
-      localStorage.removeItem(STORAGE_KEY_PASS);
-      localStorage.removeItem(STORAGE_KEY_ALLOC_LAST_AT);
-      localStorage.removeItem(STORAGE_KEY_WALLETS_V2);
-      localStorage.removeItem(STORAGE_KEY_WALLET_REGISTRY);
-      localStorage.removeItem(STORAGE_KEY_DIG_GATE);
-    } catch { }
-    setTerminalPass(null);
-    setWallets([]);
-    setActiveWalletId(null);
-    setUsdddAllocated(10);
-    setUsdddAcquired(0);
-    setTreasuryUSDDD(0);
-    setClaims([]);
-    setTreasureBalances({});
-    setDigHistory([]);
-    setCampaigns(seedSponsorCampaigns());
-    setSponsorActiveBoxId(null);
-    setDigGate({});
-    setPrompt({ mode: "IDLE" });
-    setLines([]);
-    setTimeout(() => {
-      emit("sys", "SYSTEM RESET COMPLETE");
-      emit("info", `Next: ${C("register")}`);
-    }, 50);
-  };
-
   // Rewards/history
   const showRewards = () => {
     if (!requirePass()) return;
@@ -3113,15 +3056,6 @@ export default function Page() {
       return;
     }
     if (low === "commands" || low === "cmds") return void printCommands(consoleModeRef.current);
-
-    // nuke (admin-only)
-    if (low === "nuke" || low === "wipe") {
-      if (!requireAdminUser()) return;
-      emit("warn", "⚠️ DEV COMMAND: NUKE (erases local state)");
-      emit("info", `Type ${C("YES")} to confirm or ${C("NO")} to cancel.`);
-      setPrompt({ mode: "CONFIRM_NUKE" });
-      return;
-    }
 
     // console switch
     if (low === "user") return void switchConsole("USER");
@@ -3432,28 +3366,6 @@ export default function Page() {
       else if (trimmed === "3") printHelpContext("ADMIN");
       else emit("warn", `Reply with ${C("1")}, ${C("2")} or ${C("3")}.`);
       setPrompt({ mode: "IDLE" });
-      return;
-    }
-
-    if (prompt.mode === "CONFIRM_NUKE") {
-      // hard gate: admin only, even inside confirm prompt
-      if (!terminalPass || terminalPass.username !== "admin") {
-        emit("err", "ACCESS DENIED // ADMIN CLEARANCE REQUIRED");
-        setPrompt({ mode: "IDLE" });
-        return;
-      }
-
-      if (isYes(trimmed)) {
-        setPrompt({ mode: "IDLE" });
-        nukeLocalState();
-        return;
-      }
-      if (isNo(trimmed)) {
-        emit("sys", "NUKE cancelled.");
-        setPrompt({ mode: "IDLE" });
-        return;
-      }
-      emit("warn", `Type ${C("YES")} or ${C("NO")}.`);
       return;
     }
 
@@ -4237,7 +4149,6 @@ export default function Page() {
       { label: "Docs (GitHub)", cmd: "docs" },
       { label: "Build Info", cmd: "build" },
       { label: "Clear Screen", cmd: "clear" },
-      { label: "NUKE (dev)", cmd: "nuke" },
       { label: "Close Panel", cmd: "menu" },
     ];
 
