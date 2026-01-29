@@ -162,6 +162,47 @@ export async function POST(req: Request) {
       );
     }
 
+    // Update persistent user state (best-effort, never blocks gameplay)
+    try {
+      if (event === "dig_success" && terminal_user_id) {
+        const cost = toNum((body as any).usddd_cost) ?? 0;
+
+        // Increment treasury_usddd as "Fuel Used"
+        // Keep allocated/acquired untouched here (they are client-side buckets for now)
+        await supabase
+          .from("dd_user_state")
+          .upsert(
+            {
+              user_id: terminal_user_id,
+              username: username ?? null,
+              treasury_usddd: 0, // placeholder; we'll update via RPC-style pattern below if row exists
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "user_id" }
+          );
+
+        // Add the cost onto treasury_usddd (requires existing row, but if upsert created it it's fine too)
+        const { data: cur } = await supabase
+          .from("dd_user_state")
+          .select("treasury_usddd")
+          .eq("user_id", terminal_user_id)
+          .maybeSingle();
+
+        const curTreasury = Number((cur as any)?.treasury_usddd ?? 0);
+
+        await supabase
+          .from("dd_user_state")
+          .update({
+            treasury_usddd: curTreasury + cost,
+            updated_at: new Date().toISOString(),
+            username: username ?? null,
+          })
+          .eq("user_id", terminal_user_id);
+      }
+    } catch {
+      // ignore
+    }
+
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message ?? "server_error" }, { status: 500 });
