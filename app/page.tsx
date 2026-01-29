@@ -776,10 +776,9 @@ function savePriceCache(cache: Record<string, PriceCacheHit>) {
   } catch { }
 }
 
-async function getCmcPriceUsdCached(cmcId: number): Promise<number | null> {
-  if (!Number.isFinite(cmcId) || cmcId <= 0) return null;
-
-  const key = String(cmcId);
+async function getCmcPriceUsdCached(boxId: string): Promise<number | null> {
+  if (!boxId) return null;
+  const key = String(boxId);
   const now = Date.now();
   const cache = loadPriceCache();
   const hit = cache[key];
@@ -788,13 +787,14 @@ async function getCmcPriceUsdCached(cmcId: number): Promise<number | null> {
     return hit.price;
   }
 
-  const r = await fetch(`/api/pricing/cmc?cmc_id=${encodeURIComponent(key)}`, {
+  const r = await fetch(`/api/pricing/cmc?box_id=${encodeURIComponent(key)}`, {
     cache: "no-store",
   })
     .then(res => (res.ok ? res.json() : null))
     .catch(() => null);
 
-  const price = typeof r?.price === "number" ? r.price : null;
+  const p = typeof r?.price_usd === "number" ? r.price_usd : null;
+  const price = (p != null && p > 0) ? p : null;
 
   cache[key] = { price, at: now };
   savePriceCache(cache);
@@ -2323,8 +2323,7 @@ export default function Page() {
     const digId = uid("dig");
 
     // real USD price from CMC (cached)
-    const cmcId = Number((campaign as any)?.meta?.cmc_id ?? 0);
-    const usdPrice = cmcId ? await getCmcPriceUsdCached(cmcId) : null;
+    const usdPrice = await getCmcPriceUsdCached(String(campaign.id));
 
     const realUsd = usdPrice != null ? (rewardAmt * usdPrice) : null;
     if (realUsd != null) tier = findTierByUsd(realUsd);
@@ -2431,9 +2430,9 @@ export default function Page() {
       token_symbol: sym,
       usddd_cost: campaign.costUSDDD,
       reward_amount: rewardAmt,
-      priced: usdPrice != null,
-      reward_price_usd: usdPrice,
-      reward_value_usd: usdPrice != null ? (rewardAmt * usdPrice) : null,
+      priced: usdPrice != null && usdPrice > 0,
+      reward_price_usd: (usdPrice != null && usdPrice > 0) ? usdPrice : null,
+      reward_value_usd: (usdPrice != null && usdPrice > 0) ? (rewardAmt * usdPrice) : null,
     });
 
 
