@@ -77,7 +77,9 @@ export async function POST(req: NextRequest) {
     // 2) Read persistent state (actual dd_user_state schema)
     const { data: state, error: stateErr } = await supabase
       .from("dd_user_state")
-      .select("user_id, username, usddd_allocated, usddd_acquired, treasury_usddd, acquired_total, updated_at")
+      .select(
+        "user_id, username, usddd_allocated, usddd_acquired, treasury_usddd, acquired_total, digs_count, finds_count, updated_at"
+      )
       .eq("user_id", terminal_user_id)
       .maybeSingle();
 
@@ -93,6 +95,8 @@ export async function POST(req: NextRequest) {
     const fuelUsed = Number((state as any)?.treasury_usddd ?? 0);
     const acquiredTotal = Number((state as any)?.acquired_total ?? 0);
     const updatedAt = (state as any)?.updated_at ?? null;
+    const digs = Number((state as any)?.digs_count ?? 0);
+    const finds = Number((state as any)?.finds_count ?? 0);
 
     // Keep response shape compatible with current Terminal expectations:
     // - "treasury" will now mean Fuel Used (we will rename label in UI next step)
@@ -109,8 +113,8 @@ export async function POST(req: NextRequest) {
       },
 
       counters: {
-        digs: 0,
-        finds: 0,
+        digs,
+        finds,
       },
 
       updatedAt,

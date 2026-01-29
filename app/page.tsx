@@ -273,7 +273,7 @@ type TreasureGroup = {
 // per-user per-box dig state (Phase Zero local)
 type DigGateState = { count: number; lastAt: number | null };
 
-const BUILD_VERSION = "Zero Phase v0.2.0.10";
+const BUILD_VERSION = "Zero Phase v0.2.0.11";
 const BUILD_HASH = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local";
 const STORAGE_KEY_BUILD = "dd_build_v1";
 
@@ -886,9 +886,11 @@ export default function Page() {
   const sponsorActiveBoxIdRef = useRef<string | null>(sponsorActiveBoxId);
   const claimsRef = useRef(claims);
   const digGateRef = useRef(digGate);
+  const findsCountRef = useRef<number>(0);
   // Golden entropy gate (client-side, reduces predictability + reduces request spam)
   const goldenEntropyRef = useRef(0);
   const goldenThresholdRef = useRef(0.9 + Math.random() * 0.6); // 0.9–1.5
+
 
   useEffect(() => void (campaignsRef.current = campaigns), [campaigns]);
   useEffect(() => void (usdddAllocatedRef.current = usdddAllocated), [usdddAllocated]);
@@ -1278,11 +1280,19 @@ export default function Page() {
         usdddAcquiredRef.current = acquired;
         treasuryRef.current = treasury;
 
-        // seed dig history so status shows persisted counts (Phase Zero: digs == finds)
+        // seed dig history so status shows persisted counts (DB truth)
         const persistedDigs = Number(json?.counters?.digs ?? 0);
+        const persistedFinds = Number(json?.counters?.finds ?? 0);
+
         if (Number.isFinite(persistedDigs) && persistedDigs > 0) {
+          // keep digHistoryRef as UI-only; we seed it from DB for display after refresh
           digHistoryRef.current = new Array(persistedDigs).fill({}) as any;
         }
+
+        findsCountRef.current = Math.min(
+          Number.isFinite(persistedFinds) ? persistedFinds : 0,
+          Number.isFinite(persistedDigs) ? persistedDigs : 0
+        );
 
       } catch {
         // ignore for now
@@ -1811,7 +1821,7 @@ export default function Page() {
 
     const { ready, remaining, capHit } = allocationStatus();
     const digs = digHistoryRef.current.length;
-    const finds = digHistoryRef.current.length;
+    const finds = Number.isFinite(findsCountRef.current) ? findsCountRef.current : 0;
 
     emit("sys", `MODE: ${consoleModeRef.current} - AUTO-SCROLL: ${autoScroll ? "ON" : "OFF"}`);
     emit("info", `Terminal Pass: ${authedUser ? G(authedUser) : "NONE"}`);
@@ -1821,7 +1831,7 @@ export default function Page() {
     else emit("info", `Wallet: ${G("CONNECTED")} - ${G(activeWallet.label)} - ${G(chainLabel(activeWallet.chainId))} - ${G(shortAddr(activeWallet.address))}`);
 
     emit("info", `USDDD: allocated=${GNum(usdddAllocatedRef.current, 2)} - acquired=${GNum(usdddAcquiredRef.current, 2)} - total=${GNum(usdddTotalRef.current, 2)}`);
-    emit("info", `USDDD treasury: ${GNum(treasuryRef.current, 2)}`);
+    emit("info", `Fuel Used: ${GNum(treasuryRef.current, 2)}`);
 
     emit("info", `Daily allocation: +${DAILY_ALLOCATION}/24h - cap ${BASE_CAP} - ${capHit ? "CAP REACHED" : ready ? G("AVAILABLE") : `in ${fmtMs(remaining)}`}`);
     emit("info", `Digs: ${digs > 0 ? G(String(digs)) : String(digs)} - Finds: ${finds > 0 ? G(String(finds)) : String(finds)}`);
@@ -3335,7 +3345,7 @@ export default function Page() {
       emit("sys", "");
       emit("sys", `Dig attempts: ${totalDigs}`);
       emit("sys", `USDDD spent: ${usdddUsed.toFixed(2)}`);
-      emit("sys", `USDDD treasury: ${treasuryRef.current.toFixed(2)}`);
+      emit("sys", `Fuel Used: ${treasuryRef.current.toFixed(2)}`);
       emit("sys", `Rewards claimed (tokens): ${treasureClaimed.toFixed(2)}`);
       emit("sys", "");
       emit("info", "NEXT");
