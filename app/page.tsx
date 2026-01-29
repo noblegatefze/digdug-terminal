@@ -1273,6 +1273,17 @@ export default function Page() {
         setTreasuryUSDDD(treasury);
         setAcquiredTotal(acquiredTotal);
 
+        // IMPORTANT: status reads from refs, so rehydrate refs too
+        usdddAllocatedRef.current = allocated;
+        usdddAcquiredRef.current = acquired;
+        treasuryRef.current = treasury;
+
+        // seed dig history so status shows persisted counts (Phase Zero: digs == finds)
+        const persistedDigs = Number(json?.counters?.digs ?? 0);
+        if (Number.isFinite(persistedDigs) && persistedDigs > 0) {
+          digHistoryRef.current = new Array(persistedDigs).fill({}) as any;
+        }
+
       } catch {
         // ignore for now
       }
