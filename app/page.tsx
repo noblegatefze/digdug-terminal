@@ -2342,6 +2342,40 @@ export default function Page() {
       reward_value_usd: usdValue,
     });
 
+    // persist user state snapshot (non-blocking)
+    try {
+      const uname = authedUser ?? null;
+      if (uname) {
+        fetch("/api/user/state", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: uname }),
+        })
+          .then((r) => r.json().catch(() => null))
+          .then((j) => {
+            const terminalUserId = j?.user?.id ? String(j.user.id) : null;
+            if (!terminalUserId) return;
+
+            fetch("/api/user/state/upsert", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                terminal_user_id: terminalUserId,
+                username: uname,
+                usddd_allocated: usdddAllocatedRef.current,
+                usddd_acquired: usdddAcquiredRef.current,
+                fuel_used_delta: Number(campaign.costUSDDD ?? 0),
+                digs_delta: 1,
+                finds_delta: 1, // keep as 1 for now (success == find in current UI)
+              }),
+            }).catch(() => { });
+          })
+          .catch(() => { });
+      }
+    } catch {
+      // never block gameplay
+    }
+
     // client-side entropy gate: makes Golden timing feel more random and reduces request spam
     goldenEntropyRef.current += 0.2 + Math.random() * 0.25; // ~0.20–0.45 per dig
 
