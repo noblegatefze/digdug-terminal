@@ -886,6 +886,7 @@ export default function Page() {
   const claimsRef = useRef(claims);
   const digGateRef = useRef(digGate);
   const findsCountRef = useRef<number>(0);
+  const digsCountRef = useRef<number>(0);
   // Golden entropy gate (client-side, reduces predictability + reduces request spam)
   const goldenEntropyRef = useRef(0);
   const goldenThresholdRef = useRef(0.9 + Math.random() * 0.6); // 0.9–1.5
@@ -1282,6 +1283,13 @@ export default function Page() {
         // seed dig history so status shows persisted counts (DB truth)
         const persistedDigs = Number(json?.counters?.digs ?? 0);
         const persistedFinds = Number(json?.counters?.finds ?? 0);
+
+        // NEW: authoritative counters for status
+        digsCountRef.current = Number.isFinite(persistedDigs) ? persistedDigs : 0;
+        findsCountRef.current = Math.min(
+          Number.isFinite(persistedFinds) ? persistedFinds : 0,
+          Number.isFinite(persistedDigs) ? persistedDigs : 0
+        );
 
         if (Number.isFinite(persistedDigs) && persistedDigs > 0) {
           // keep digHistoryRef as UI-only; we seed it from DB for display after refresh
@@ -1819,7 +1827,7 @@ export default function Page() {
     }
 
     const { ready, remaining, capHit } = allocationStatus();
-    const digs = digHistoryRef.current.length;
+    const digs = Number.isFinite(digsCountRef.current) ? digsCountRef.current : 0;
     const finds = Number.isFinite(findsCountRef.current) ? findsCountRef.current : 0;
 
     emit("sys", `MODE: ${consoleModeRef.current} - AUTO-SCROLL: ${autoScroll ? "ON" : "OFF"}`);
@@ -2353,7 +2361,10 @@ export default function Page() {
     // keep ref in sync so `status` shows correct Digs immediately
     digHistoryRef.current = [...digHistoryRef.current, record] as any;
 
-    // UI polish (v0.2.0.11): update finds immediately; DB remains authoritative on refresh
+    // NEW: status counters (live)
+    digsCountRef.current = (Number.isFinite(digsCountRef.current) ? digsCountRef.current : 0) + 1;
+
+    // UI polish: update finds immediately; DB remains authoritative on refresh
     if (rewardAmt > 0) {
       findsCountRef.current = (Number.isFinite(findsCountRef.current) ? findsCountRef.current : 0) + 1;
     }
