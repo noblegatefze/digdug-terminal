@@ -167,7 +167,7 @@ export async function POST(req: Request) {
       if (event === "dig_success" && terminal_user_id) {
         const cost = toNum((body as any).usddd_cost) ?? 0;
         if (cost > 0) {
-          const findsInc = rewardValueUsd && rewardValueUsd > 0 ? 1 : 0;
+          const findsInc = rewardAmount && rewardAmount > 0 ? 1 : 0;
 
           await supabase.rpc("rpc_user_add_fuel", {
             p_user_id: terminal_user_id,
