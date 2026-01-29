@@ -141,9 +141,6 @@ export async function POST(req: Request) {
       priced: rewardValueUsd != null,
       reward_price_usd: rewardPriceUsd,
       reward_value_usd: rewardValueUsd,
-      // Optional meta (safe to ignore server-side)
-      session_id: (body as any).session_id ?? null,
-      ts: (body as any).ts ?? null,
     };
 
     const r = await fetch(`${url}/rest/v1/stats_events`, {
