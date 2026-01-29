@@ -887,6 +887,7 @@ export default function Page() {
   const digGateRef = useRef(digGate);
   const findsCountRef = useRef<number>(0);
   const digsCountRef = useRef<number>(0);
+  const terminalUserIdRef = useRef<string | null>(null);
   // Golden entropy gate (client-side, reduces predictability + reduces request spam)
   const goldenEntropyRef = useRef(0);
   const goldenThresholdRef = useRef(0.9 + Math.random() * 0.6); // 0.9–1.5
@@ -1255,6 +1256,7 @@ export default function Page() {
 
         if (cancelled) return;
         if (!json?.ok) return;
+        terminalUserIdRef.current = String(json?.user?.id ?? "") || null;
         setPaused(Boolean(json?.flags?.pause_all));
 
 
@@ -2370,7 +2372,7 @@ export default function Page() {
     }
 
     await sendStat("dig_success", {
-      terminal_user_id: authedUser ?? null,
+      terminal_user_id: terminalUserIdRef.current,
       box_id: campaign.id,
       chain: campaign.deployChainId,
       token_symbol: sym,
