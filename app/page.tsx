@@ -946,7 +946,7 @@ export default function Page() {
   // Golden entropy gate (client-side, reduces predictability + reduces request spam)
   const goldenEntropyRef = useRef(0);
   const goldenThresholdRef = useRef(0.9 + Math.random() * 0.6); // 0.9–1.5
-
+  const lastGoldenCheckAtRef = useRef<number>(0);
 
   useEffect(() => void (campaignsRef.current = campaigns), [campaigns]);
   useEffect(() => void (usdddAllocatedRef.current = usdddAllocated), [usdddAllocated]);
@@ -2439,36 +2439,46 @@ export default function Page() {
 
     // NOTE (v0.2.0.11): dd_user_state is DB-authoritative via stats ingest RPC; no client snapshot writes here.
 
-    // client-side entropy gate: makes Golden timing feel more random and reduces request spam
-    goldenEntropyRef.current += 0.2 + Math.random() * 0.25; // ~0.20–0.45 per dig
+    // --- Golden Find client gate (SAFE) ---
+    // 1) Never attempt more than once per 60s per client.
+    // 2) Only attempt when the REAL dig USD value is within $5–$20.
+    // 3) No random usd_value. No forced eligibility.
 
-    if (goldenEntropyRef.current >= goldenThresholdRef.current) {
+    const GOLD_MIN = 5;
+    const GOLD_MAX = 20;
+    const GOLDEN_CLIENT_COOLDOWN_MS = 60_000;
+
+    goldenEntropyRef.current += 0.2 + Math.random() * 0.25; // keep your feel
+
+    const now = Date.now();
+    const canTryByTime = (lastGoldenCheckAtRef.current ?? 0) + GOLDEN_CLIENT_COOLDOWN_MS <= now;
+
+    // Only attempt if this dig’s realUsd is actually in-range
+    const eligibleByValue = realUsd != null && realUsd >= GOLD_MIN && realUsd <= GOLD_MAX;
+
+    if (eligibleByValue && canTryByTime && goldenEntropyRef.current >= goldenThresholdRef.current) {
       goldenEntropyRef.current = 0;
-      goldenThresholdRef.current = 0.9 + Math.random() * 0.6; // reroll next threshold
+      goldenThresholdRef.current = 0.9 + Math.random() * 0.6;
+      lastGoldenCheckAtRef.current = now;
 
-      try {
-        fetch("/api/golden/check", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            usd_value: 5 + Math.random() * 15,  // Golden Find attempt value ($5—$20)
-            token: (await pickEligibleGoldenTokenSymbol()) ?? sym, // prefer eligible tokens with inventory
-            chain: campaign.deployChainId,  // ETH/BNB/SOL/ARB/BASE
-            username: authedUser,
-          }),
+      fetch("/api/golden/check", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          usd_value: realUsd,
+          token: sym,
+          chain: campaign.deployChainId,
+          username: authedUser,
+        }),
+      })
+        .then((r) => r.json().catch(() => null))
+        .then((out) => {
+          if (out?.ok && out?.golden && out?.broadcast_sent === true && typeof out?.broadcast_message === "string") {
+            emit("sys", out.broadcast_message);
+            emit("sys", "Claim code is in Telegram: https://t.me/digdugdo");
+          }
         })
-          .then((r) => r.json().catch(() => null))
-          .then((out) => {
-            if (out?.ok && out?.golden && out?.broadcast_sent === true && typeof out?.broadcast_message === "string") {
-              // broadcast_message already contains the "GOLDEN FIND" header
-              emit("sys", out.broadcast_message);
-              emit("sys", "Claim code is in Telegram: https://t.me/digdugdo");
-            }
-          })
-          .catch(() => { });
-      } catch {
-        // ignore
-      }
+        .catch(() => { });
     }
 
     // keep UI line “(~$X)” but make it honest
