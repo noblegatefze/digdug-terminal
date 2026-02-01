@@ -14,7 +14,6 @@ async function resolveTerminalUserId(supabase: any, username?: string | null): P
 
     if (error) return null;
 
-    // data shape depends on Supabase typings; treat safely
     const id = (data as any)?.id;
     return id ? String(id) : null;
   } catch {
@@ -45,7 +44,7 @@ function toNum(v: any): number | null {
 // Server-side admin flags (DB-controlled pause)
 const adminSupabase = createClient(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY"));
 
-// Soft global throttle for dig_success (prevents utilization explosions)
+// Soft global throttle (optional safety)
 const DIG_SUCCESS_CAP_PER_MIN = Number(process.env.DIG_SUCCESS_CAP_PER_MIN ?? "600"); // tune on Vercel
 const DIG_SUCCESS_WINDOW_SEC = 60;
 
@@ -59,6 +58,11 @@ async function isStatsPaused(): Promise<boolean> {
   return Boolean(data?.pause_all || data?.pause_stats_ingest);
 }
 
+/**
+ * TELEMETRY ONLY.
+ * This endpoint must NOT mutate canonical balances or fuel.
+ * Canonical accounting happens via rpc_dig_reserve + dd_usddd_spend_ledger.
+ */
 export async function POST(req: Request) {
   try {
     // DB pause (preferred)
@@ -76,7 +80,7 @@ export async function POST(req: Request) {
 
     const body = await req.json().catch(() => null);
     if (!body || typeof body !== "object") {
-      return NextResponse.json({ ok: false, error: "Invalid JSON" }, { status: 400 });
+      return NextResponse.json({ ok: false, error: "invalid_json" }, { status: 400 });
     }
 
     const username =
@@ -86,16 +90,14 @@ export async function POST(req: Request) {
     const event = String((body as any).event ?? "").trim();
 
     if (!install_id || install_id.length < 8) {
-      return NextResponse.json({ ok: false, error: "install_id required" }, { status: 400 });
+      return NextResponse.json({ ok: false, error: "install_id_required" }, { status: 400 });
     }
     if (!event || !ALLOWED_EVENTS.has(event)) {
-      return NextResponse.json({ ok: false, error: "invalid event" }, { status: 400 });
+      return NextResponse.json({ ok: false, error: "invalid_event" }, { status: 400 });
     }
 
-    // Create supabase client only after basic validation
-    const supabase = createClient(url, key, {
-      auth: { persistSession: false },
-    });
+    // Create supabase client only after validation
+    const supabase = createClient(url, key, { auth: { persistSession: false } });
 
     // Prefer explicit terminal_user_id from client (no lookup), fallback to username resolution
     const terminal_user_id =
@@ -103,7 +105,46 @@ export async function POST(req: Request) {
         ? String((body as any).terminal_user_id)
         : await resolveTerminalUserId(supabase, username);
 
-    // TRUST FRONTEND SNAPSHOT (Phase Zero rule)
+    // Optional idempotency: dig_id is the best stable key if client sends it
+    const dig_id = typeof (body as any)?.dig_id === "string" ? String((body as any).dig_id).trim() : null;
+
+    // Soft global throttle (keeps DB safe if a client goes nuts)
+    // NOTE: This is telemetry throttle only. Canonical debits are protected by rpc_dig_reserve.
+    if (event === "dig_success") {
+      try {
+        const since = new Date(Date.now() - DIG_SUCCESS_WINDOW_SEC * 1000).toISOString();
+
+        const { count } = await supabase
+          .from("stats_events")
+          .select("id", { count: "exact", head: true })
+          .eq("event", "dig_success")
+          .gte("created_at", since);
+
+        if ((count ?? 0) > DIG_SUCCESS_CAP_PER_MIN) {
+          return NextResponse.json({ ok: true, throttled: true }, { status: 200 });
+        }
+      } catch {
+        // ignore throttle failures; telemetry should not break gameplay
+      }
+    }
+
+    // If dig_id exists, prevent duplicate dig_success writes (telemetry hygiene)
+    if (event === "dig_success" && dig_id) {
+      const { data: exists } = await supabase
+        .from("stats_events")
+        .select("id")
+        .eq("event", "dig_success")
+        .eq("install_id", install_id)
+        .contains("box_id", (body as any).box_id ?? null) // harmless if null
+        .limit(1);
+
+      // NOTE: stats_events does not currently store dig_id, so we can't do perfect dedupe here yet.
+      // This block is intentionally conservative (no-op). We'll dedupe once dig_id is stored in stats_events meta.
+      // Keeping for future upgrade without breaking now.
+      void exists;
+    }
+
+    // TRUST FRONTEND SNAPSHOT (Phase Zero)
     const rewardAmount = toNum((body as any).reward_amount);
     const rewardPriceUsd = toNum((body as any).reward_price_usd);
     const rewardValueUsd = toNum((body as any).reward_value_usd);
@@ -120,6 +161,8 @@ export async function POST(req: Request) {
       priced: rewardValueUsd != null,
       reward_price_usd: rewardPriceUsd,
       reward_value_usd: rewardValueUsd,
+      // IMPORTANT: We do NOT mutate any balances here.
+      // Canonical debits happen via rpc_dig_reserve.
     };
 
     const r = await fetch(`${url}/rest/v1/stats_events`, {
@@ -139,26 +182,6 @@ export async function POST(req: Request) {
         { ok: false, error: "insert_failed", detail: txt.slice(0, 200) },
         { status: 500 }
       );
-    }
-
-    // Update persistent Fuel Used (treasury_usddd) atomically (best-effort, never blocks gameplay)
-    try {
-      if (event === "dig_success" && terminal_user_id) {
-        const cost = toNum((body as any).usddd_cost) ?? 0;
-        if (cost > 0) {
-          const findsInc = rewardAmount && rewardAmount > 0 ? 1 : 0;
-
-          await supabase.rpc("rpc_user_add_fuel", {
-            p_user_id: terminal_user_id,
-            p_delta: cost,
-            p_digs_inc: 1,
-            p_finds_inc: findsInc,
-          });
-        }
-
-      }
-    } catch {
-      // ignore
     }
 
     return NextResponse.json({ ok: true });

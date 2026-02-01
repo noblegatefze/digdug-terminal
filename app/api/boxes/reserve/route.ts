@@ -66,7 +66,7 @@ async function fetchCmcUsdPrice(cmcId: number): Promise<number | null> {
 }
 
 export async function POST(req: NextRequest) {
-  // EMERGENCY PAUSE: stop all reserve/spend writes (bot kill-switch)
+  // EMERGENCY PAUSE
   if (process.env.DIGDUG_PAUSE === "1") {
     return NextResponse.json(
       { ok: false, error: "Protocol temporarily paused." },
@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // ADMIN PANEL PAUSE (DB flags)
+  // ADMIN PANEL PAUSE
   if (await isReservePaused()) {
     return NextResponse.json(
       { ok: false, error: "reserve_paused" },
@@ -93,95 +93,42 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Missing/invalid fields" }, { status: 400 });
   }
 
-  // 1) resolve user
-  const { data: user, error: uerr } = await supabase
-    .from("dd_terminal_users")
-    .select("id, username")
-    .eq("username", username)
-    .single();
-
-  if (uerr || !user) {
-    return NextResponse.json({ ok: false, error: "User not found" }, { status: 404 });
-  }
-
-  // 2) resolve box token/chain + status (+ meta for cmc_id)
+  // resolve cmc_id from box meta (same as before)
   const { data: box, error: berr } = await supabase
     .from("dd_boxes")
-    .select("id,status,deploy_chain_id,token_address,token_symbol,meta")
+    .select("id, meta")
     .eq("id", box_id)
     .single();
 
   if (berr || !box) {
     return NextResponse.json({ ok: false, error: "Box not found" }, { status: 404 });
   }
-  if (String(box.status) !== "ACTIVE") {
-    return NextResponse.json({ ok: false, error: "Box inactive" }, { status: 400 });
-  }
 
-  // 3) idempotency: if a reserve already exists for this dig_id, no-op
-  const { data: existing } = await supabase
-    .from("dd_box_ledger")
-    .select("id")
-    .eq("box_id", box_id)
-    .eq("entry_type", "claim_reserve")
-    .contains("meta", { dig_id })
-    .limit(1);
-
-  if (existing && existing.length > 0) {
-    return NextResponse.json({ ok: true, already: true });
-  }
-
-  // 4) sanity: ensure enough available balance (based on current ledger rollup)
-  const { data: accRows } = await supabase
-    .from("dd_box_accounting")
-    .select("box_id,deposited_total,withdrawn_total,claimed_unwithdrawn")
-    .eq("box_id", box_id)
-    .limit(1);
-
-  const acc = accRows?.[0];
-  const deposited = Number(acc?.deposited_total ?? 0);
-  const withdrawn = Number(acc?.withdrawn_total ?? 0);
-  const reserved = Number(acc?.claimed_unwithdrawn ?? 0);
-  const available = deposited - withdrawn - reserved;
-
-  if (amount > available + 1e-9) {
-    return NextResponse.json(
-      { ok: false, error: "insufficient_box_balance", available },
-      { status: 400 }
-    );
-  }
-
-  // 5) optional: CMC price-at-dig-time (only if meta.cmc_id + API key exist)
   const metaObj: any = (box as any)?.meta ?? {};
   const cmc_id = asInt(metaObj?.cmc_id);
   const price_usd_at_dig = cmc_id ? await fetchCmcUsdPrice(cmc_id) : null;
   const price_at = new Date().toISOString();
 
-  // 6) insert reserve ledger entry
-  const { error: ierr } = await supabase.from("dd_box_ledger").insert({
-    box_id,
-    entry_type: "claim_reserve",
-    amount,
-    chain_id: String((box as any).deploy_chain_id ?? null),
-    token_address: String((box as any).token_address ?? null),
-    meta: {
-      dig_id,
-      username: user.username,
-      user_id: user.id,
-      source: "dig",
-      token_symbol: (box as any).token_symbol ?? null,
-
-      // pricing (v0.1.16.2)
-      cmc_id: cmc_id ?? null,
-      price_source: cmc_id ? "cmc" : null,
-      price_usd_at_dig: price_usd_at_dig ?? null,
-      price_at,
-    },
+  // Atomic reserve + debit inside DB transaction
+  const { data, error } = await supabase.rpc("rpc_dig_reserve", {
+    p_username: username,
+    p_box_id: box_id,
+    p_dig_id: dig_id,
+    p_amount: amount,
+    p_cmc_id: cmc_id,
+    p_price_usd_at_dig: price_usd_at_dig,
+    p_price_at: price_at,
   });
 
-  if (ierr) {
-    return NextResponse.json({ ok: false, error: ierr.message }, { status: 500 });
+  if (error) {
+    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true, already: false });
+  const out: any = data;
+  if (!out?.ok) {
+    // pass through known structured errors
+    return NextResponse.json(out ?? { ok: false, error: "reserve_failed" }, { status: 400 });
+  }
+
+  return NextResponse.json(out);
 }
