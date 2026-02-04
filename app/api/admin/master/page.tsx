@@ -93,6 +93,10 @@ export default function AdminMasterPage() {
   const [boxesLoading, setBoxesLoading] = useState(false);
   const [boxesHours, setBoxesHours] = useState(24);
   const [boxesInfo, setBoxesInfo] = useState<any>(null);
+  const [fundErr, setFundErr] = useState<string | null>(null);
+  const [fundLoading, setFundLoading] = useState(false);
+  const [fundLimit, setFundLimit] = useState(50);
+  const [fundInfo, setFundInfo] = useState<any>(null);
 
   const tabs = useMemo(
     () => [
@@ -195,6 +199,23 @@ export default function AdminMasterPage() {
       setBoxesInfo(res.json);
     } finally {
       setBoxesLoading(false);
+    }
+  }
+
+  async function refreshFund() {
+    setFundErr(null);
+    setFundLoading(true);
+    try {
+      const lim = Math.max(10, Math.min(200, Number(fundLimit) || 50));
+      const res = await fetchJson(`/api/admin/metrics/fund?limit=${encodeURIComponent(String(lim))}`);
+      if (!res.ok || !res.json?.ok) {
+        setFundErr(res.json?.error ?? `fund_failed_${res.status}`);
+        setFundInfo(res.json);
+        return;
+      }
+      setFundInfo(res.json);
+    } finally {
+      setFundLoading(false);
     }
   }
 
@@ -1012,14 +1033,148 @@ export default function AdminMasterPage() {
 
         {tab === "fund" && (
           <Card title="Fund Network">
-            <CodeBlock
-              value={{
-                note:
-                  "Next step: fund backing (global + per-user) and position drilldown (sweeps, mint, transfer, burn).",
-              }}
-            />
+            <div style={{ display: "flex", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+              <input
+                value={String(fundLimit)}
+                onChange={(e) => setFundLimit(Number(e.target.value))}
+                placeholder="latest limit (10–200)"
+                inputMode="numeric"
+                style={{
+                  width: 200,
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  background: "rgba(0,0,0,0.45)",
+                  color: "#fff",
+                  outline: "none",
+                  fontSize: 12,
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") refreshFund();
+                }}
+              />
+
+              <button
+                onClick={refreshFund}
+                disabled={fundLoading}
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  background: fundLoading ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.35)",
+                  color: "#fff",
+                  cursor: fundLoading ? "not-allowed" : "pointer",
+                  fontSize: 12,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {fundLoading ? "Loading…" : "Load"}
+              </button>
+
+              <div style={{ fontSize: 12, opacity: 0.7, alignSelf: "center" }}>
+                Totals are computed over all positions; table shows latest N.
+              </div>
+            </div>
+
+            {fundErr ? (
+              <div style={{ marginBottom: 10, color: "#ff6b6b", fontSize: 12 }}>
+                {fundErr}
+              </div>
+            ) : null}
+
+            {(() => {
+              const o = fundInfo ?? null;
+              const t = o?.totals ?? null;
+              const latest = Array.isArray(o?.latest) ? o.latest : [];
+
+              const fmtInt = (n: any) => (Number.isFinite(Number(n)) ? Number(n).toLocaleString() : "—");
+              const fmtMoney = (n: any) =>
+                Number.isFinite(Number(n)) ? Number(n).toLocaleString(undefined, { maximumFractionDigits: 6 }) : "—";
+
+              return (
+                <>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10, marginBottom: 12 }}>
+                    <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, padding: 12, background: "rgba(0,0,0,0.35)" }}>
+                      <div style={{ fontSize: 12, opacity: 0.75 }}>Total Funded (USDT)</div>
+                      <div style={{ fontSize: 22, fontWeight: 800, marginTop: 6 }}>{fmtMoney(t?.total_usdt)}</div>
+                      <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>
+                        Positions: {fmtInt(t?.positions)} (active {fmtInt(t?.active_positions)}, awaiting {fmtInt(t?.awaiting_positions)})
+                      </div>
+                    </div>
+
+                    <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, padding: 12, background: "rgba(0,0,0,0.35)" }}>
+                      <div style={{ fontSize: 12, opacity: 0.75 }}>USDDD Allocated</div>
+                      <div style={{ fontSize: 22, fontWeight: 800, marginTop: 6 }}>{fmtMoney(t?.total_usddd_allocated)}</div>
+                      <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>Custodied/locked allocations</div>
+                    </div>
+
+                    <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, padding: 12, background: "rgba(0,0,0,0.35)" }}>
+                      <div style={{ fontSize: 12, opacity: 0.75 }}>USDDD Accrued (display)</div>
+                      <div style={{ fontSize: 22, fontWeight: 800, marginTop: 6 }}>{fmtMoney(t?.total_usddd_accrued_display)}</div>
+                      <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>Display accrual (not minted)</div>
+                    </div>
+                  </div>
+
+                  <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 8 }}>Latest positions</div>
+
+                  <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, overflow: "hidden" }}>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "140px 120px 120px 120px 1fr",
+                        padding: "10px 12px",
+                        background: "rgba(0,0,0,0.40)",
+                        fontSize: 12,
+                        opacity: 0.8,
+                      }}
+                    >
+                      <div>Ref</div>
+                      <div>Status</div>
+                      <div>USDT</div>
+                      <div>USDDD</div>
+                      <div>Created</div>
+                    </div>
+
+                    {latest.slice(0, Number(fundLimit) || 50).map((r: any, idx: number) => (
+                      <div
+                        key={idx}
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "140px 120px 120px 120px 1fr",
+                          padding: "10px 12px",
+                          borderTop: "1px solid rgba(255,255,255,0.08)",
+                          fontSize: 12,
+                        }}
+                      >
+                        <div style={{ fontWeight: 700 }}>{String(r.position_ref ?? "—").slice(0, 14)}</div>
+                        <div>{String(r.status ?? "—")}</div>
+                        <div>{fmtMoney(r.funded_usdt)}</div>
+                        <div>{fmtMoney(r.usddd_allocated)}</div>
+                        <div style={{ opacity: 0.85 }}>{String(r.created_at ?? "").slice(0, 19)}</div>
+                      </div>
+                    ))}
+
+                    {!latest.length ? (
+                      <div style={{ padding: "10px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", fontSize: 12, opacity: 0.7 }}>
+                        No data loaded yet. Set limit and click Load.
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div style={{ marginTop: 10 }}>
+                    <details style={{ fontSize: 12, opacity: 0.9 }}>
+                      <summary style={{ cursor: "pointer" }}>View raw</summary>
+                      <div style={{ marginTop: 8 }}>
+                        <CodeBlock value={o ?? { note: "No data loaded yet." }} />
+                      </div>
+                    </details>
+                  </div>
+                </>
+              );
+            })()}
           </Card>
         )}
+
       </div>
     </div>
   );
