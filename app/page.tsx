@@ -2335,8 +2335,24 @@ export default function Page() {
       return;
     }
 
-    // reserve globally in DB ledger (authoritative; idempotent by digId)
     if (authedUser) {
+      // 1) Persist CLAIM first (now includes dig_id)
+      try {
+        fetch("/api/claims/add", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            username: authedUser,
+            box_id: campaign.id,
+            dig_id: digId,              // ✅ REQUIRED
+            amount: rewardAmt,
+          }),
+        }).catch(() => { });
+      } catch {
+        // ignore
+      }
+
+      // 2) Then reserve in DB ledger (claim-gated by dig_id)
       try {
         fetch("/api/boxes/reserve", {
           method: "POST",
@@ -2344,7 +2360,7 @@ export default function Page() {
           body: JSON.stringify({
             username: authedUser,
             box_id: campaign.id,
-            dig_id: digId,
+            dig_id: digId,              // ✅ linkage
             amount: rewardAmt,
           }),
         }).catch(() => { });
@@ -2352,9 +2368,6 @@ export default function Page() {
         // ignore
       }
     }
-
-    // reserve on box ledger (claimed until withdrawn)
-    setCampaigns((prev) => prev.map((c) => (c.id === campaign.id ? { ...c, claimedUnwithdrawn: c.claimedUnwithdrawn + rewardAmt } : c)));
 
     // claim record for correct withdrawals
     if (authedUser) {
