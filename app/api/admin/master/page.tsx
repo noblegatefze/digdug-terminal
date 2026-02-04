@@ -83,6 +83,8 @@ export default function AdminMasterPage() {
   const [integrityInfo, setIntegrityInfo] = useState<any>(null);
   const [userQuery, setUserQuery] = useState("");
   const [userInfo, setUserInfo] = useState<any>(null);
+  const [overviewInfo, setOverviewInfo] = useState<any>(null);
+  const [overviewErr, setOverviewErr] = useState<string | null>(null);
 
   const tabs = useMemo(
     () => [
@@ -100,6 +102,10 @@ export default function AdminMasterPage() {
     const res = await fetchJson("/api/admin/auth/me");
     setAuthed(Boolean(res.ok && res.json?.ok));
     setReady(true);
+    if (Boolean(res.ok && res.json?.ok)) {
+      // load overview immediately once authed
+      refreshOverview().catch(() => { });
+    }
   }
 
   useEffect(() => {
@@ -145,6 +151,17 @@ export default function AdminMasterPage() {
     // For now you’ll see 404 until we create it.
     const res = await fetchJson("/api/admin/metrics/integrity");
     setIntegrityInfo(res.json);
+  }
+
+  async function refreshOverview() {
+    setOverviewErr(null);
+    const res = await fetchJson("/api/admin/metrics/overview");
+    if (!res.ok) {
+      setOverviewErr(res.json?.error ?? `overview_failed_${res.status}`);
+      setOverviewInfo(res.json);
+      return;
+    }
+    setOverviewInfo(res.json);
   }
 
   async function lookupUser() {
@@ -305,6 +322,40 @@ export default function AdminMasterPage() {
       <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 12 }}>
         {tab === "overview" && (
           <>
+            <Card title="Protocol Snapshot (24h)">
+              <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+                <button
+                  onClick={refreshOverview}
+                  style={{
+                    padding: "8px 10px",
+                    borderRadius: 10,
+                    border: "1px solid rgba(255,255,255,0.14)",
+                    background: "rgba(0,0,0,0.35)",
+                    color: "#fff",
+                    cursor: "pointer",
+                    fontSize: 12,
+                  }}
+                >
+                  Refresh Overview
+                </button>
+              </div>
+
+              {overviewErr ? (
+                <div style={{ marginBottom: 10, color: "#ff6b6b", fontSize: 12 }}>
+                  {overviewErr}
+                </div>
+              ) : null}
+
+              <CodeBlock
+                value={
+                  overviewInfo ?? {
+                    note: "Loading…",
+                    hint: "Click Refresh Overview if it doesn’t auto-load.",
+                  }
+                }
+              />
+            </Card>
+
             <Card title="Build / Version">
               <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
                 <button
@@ -343,19 +394,6 @@ export default function AdminMasterPage() {
                 </button>
               </div>
               <CodeBlock value={flagsInfo ?? { note: "Click Load. If 404, your flags route is elsewhere — we’ll wire it." }} />
-            </Card>
-
-            <Card title="Next (we’ll add)">
-              <CodeBlock
-                value={{
-                  todo: [
-                    "Protocol money snapshot (24h): spent / claims USD / efficiency",
-                    "Fund totals: total funded, active/awaiting",
-                    "Integrity: reserves_without_claim (last 24h), claims_without_reserve (last 24h)",
-                    "User lookup: balances + last 50 spends + last 50 claims",
-                  ],
-                }}
-              />
             </Card>
           </>
         )}
