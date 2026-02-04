@@ -89,6 +89,10 @@ export default function AdminMasterPage() {
   const [integrityLoading, setIntegrityLoading] = useState(false);
   const [userErr, setUserErr] = useState<string | null>(null);
   const [userLoading, setUserLoading] = useState(false);
+  const [boxesErr, setBoxesErr] = useState<string | null>(null);
+  const [boxesLoading, setBoxesLoading] = useState(false);
+  const [boxesHours, setBoxesHours] = useState(24);
+  const [boxesInfo, setBoxesInfo] = useState<any>(null);
 
   const tabs = useMemo(
     () => [
@@ -175,6 +179,23 @@ export default function AdminMasterPage() {
       return;
     }
     setOverviewInfo(res.json);
+  }
+
+  async function refreshBoxes() {
+    setBoxesErr(null);
+    setBoxesLoading(true);
+    try {
+      const hrs = Math.max(1, Math.min(168, Number(boxesHours) || 24));
+      const res = await fetchJson(`/api/admin/metrics/boxes?sinceHours=${encodeURIComponent(String(hrs))}`);
+      if (!res.ok || !res.json?.ok) {
+        setBoxesErr(res.json?.error ?? `boxes_failed_${res.status}`);
+        setBoxesInfo(res.json);
+        return;
+      }
+      setBoxesInfo(res.json);
+    } finally {
+      setBoxesLoading(false);
+    }
   }
 
   async function lookupUser() {
@@ -848,15 +869,144 @@ export default function AdminMasterPage() {
             })()}
           </Card>
         )}
-        
+
         {tab === "boxes" && (
-          <Card title="Boxes">
-            <CodeBlock
-              value={{
-                note:
-                  "Next step: box accounting view (fund_in / reserved / claimed / withdrawn) + mismatches by box.",
-              }}
-            />
+          <Card title="Boxes (Accounting)">
+            <div style={{ display: "flex", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+              <input
+                value={String(boxesHours)}
+                onChange={(e) => setBoxesHours(Number(e.target.value))}
+                placeholder="sinceHours (1–168)"
+                inputMode="numeric"
+                style={{
+                  width: 180,
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  background: "rgba(0,0,0,0.45)",
+                  color: "#fff",
+                  outline: "none",
+                  fontSize: 12,
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") refreshBoxes();
+                }}
+              />
+
+              <button
+                onClick={refreshBoxes}
+                disabled={boxesLoading}
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  background: boxesLoading ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.35)",
+                  color: "#fff",
+                  cursor: boxesLoading ? "not-allowed" : "pointer",
+                  fontSize: 12,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {boxesLoading ? "Loading…" : "Load"}
+              </button>
+
+              <div style={{ fontSize: 12, opacity: 0.7, alignSelf: "center" }}>
+                Shows top mismatches by |claimed − reserved| within the time window.
+              </div>
+            </div>
+
+            {boxesErr ? (
+              <div style={{ marginBottom: 10, color: "#ff6b6b", fontSize: 12 }}>
+                {boxesErr}
+              </div>
+            ) : null}
+
+            {(() => {
+              const o = boxesInfo ?? null;
+              const top = Array.isArray(o?.top_mismatches) ? o.top_mismatches : [];
+              const sinceHours = o?.window?.sinceHours ?? null;
+              const since = o?.window?.since ?? null;
+
+              const fmtMoney = (n: any) =>
+                Number.isFinite(Number(n))
+                  ? Number(n).toLocaleString(undefined, { maximumFractionDigits: 6 })
+                  : "—";
+
+              const fmtBox = (s: any) => String(s ?? "—");
+
+              return (
+                <>
+                  <div style={{ fontSize: 12, opacity: 0.65, marginBottom: 10 }}>
+                    Window: last <b>{sinceHours ?? boxesHours}</b> hours{" "}
+                    <span style={{ opacity: 0.7 }}> (since {since ? String(since) : "—"})</span>
+                  </div>
+
+                  <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, overflow: "hidden" }}>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "120px 1fr 1fr 1fr 1fr",
+                        padding: "10px 12px",
+                        background: "rgba(0,0,0,0.40)",
+                        fontSize: 12,
+                        opacity: 0.8,
+                      }}
+                    >
+                      <div>Box</div>
+                      <div>Fund In</div>
+                      <div>Reserved</div>
+                      <div>Claimed</div>
+                      <div>Claimed − Reserved</div>
+                    </div>
+
+                    {top.slice(0, 20).map((r: any, idx: number) => {
+                      const delta = Number(r.claimed_minus_reserved ?? 0);
+                      const deltaBg =
+                        Math.abs(delta) < 0.000001
+                          ? "transparent"
+                          : delta > 0
+                            ? "rgba(0,255,170,0.06)"
+                            : "rgba(255,80,80,0.06)";
+
+                      return (
+                        <div
+                          key={idx}
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "120px 1fr 1fr 1fr 1fr",
+                            padding: "10px 12px",
+                            borderTop: "1px solid rgba(255,255,255,0.08)",
+                            fontSize: 12,
+                            background: deltaBg,
+                          }}
+                        >
+                          <div style={{ fontWeight: 700 }}>{fmtBox(r.box_id)}</div>
+                          <div>{fmtMoney(r.fund_in)}</div>
+                          <div>{fmtMoney(r.reserved)}</div>
+                          <div>{fmtMoney(r.claimed)}</div>
+                          <div style={{ fontWeight: 700 }}>{fmtMoney(r.claimed_minus_reserved)}</div>
+                        </div>
+                      );
+                    })}
+
+                    {!top.length ? (
+                      <div style={{ padding: "10px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", fontSize: 12, opacity: 0.7 }}>
+                        No data loaded yet. Set sinceHours and click Load.
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div style={{ marginTop: 10 }}>
+                    <details style={{ fontSize: 12, opacity: 0.9 }}>
+                      <summary style={{ cursor: "pointer" }}>View raw</summary>
+                      <div style={{ marginTop: 8 }}>
+                        <CodeBlock value={o ?? { note: "No data loaded yet." }} />
+                      </div>
+                    </details>
+                  </div>
+                </>
+              );
+            })()}
           </Card>
         )}
 
