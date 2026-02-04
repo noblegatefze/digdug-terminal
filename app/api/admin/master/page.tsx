@@ -97,6 +97,13 @@ export default function AdminMasterPage() {
   const [fundLoading, setFundLoading] = useState(false);
   const [fundLimit, setFundLimit] = useState(50);
   const [fundInfo, setFundInfo] = useState<any>(null);
+  const [flagsErr, setFlagsErr] = useState<string | null>(null);
+  const [flagsLoading, setFlagsLoading] = useState(false);
+  const [flagsSaving, setFlagsSaving] = useState(false);
+
+  const [flagPauseAll, setFlagPauseAll] = useState(false);
+  const [flagPauseReserve, setFlagPauseReserve] = useState(false);
+  const [flagPauseStatsIngest, setFlagPauseStatsIngest] = useState(false);
 
   const tabs = useMemo(
     () => [
@@ -153,9 +160,24 @@ export default function AdminMasterPage() {
   }
 
   async function refreshFlags() {
-    // if you already have /api/admin/flags, this will populate; otherwise it'll show the error cleanly
-    const res = await fetchJson("/api/admin/flags");
-    setFlagsInfo(res.json);
+    setFlagsErr(null);
+    setFlagsLoading(true);
+    try {
+      const res = await fetchJson("/api/admin/flags");
+      if (!res.ok || !res.json?.ok) {
+        setFlagsErr(res.json?.error ?? `flags_failed_${res.status}`);
+        setFlagsInfo(res.json);
+        return;
+      }
+
+      const f = res.json.flags;
+      setFlagsInfo(res.json);
+      setFlagPauseAll(Boolean(f?.pause_all));
+      setFlagPauseReserve(Boolean(f?.pause_reserve));
+      setFlagPauseStatsIngest(Boolean(f?.pause_stats_ingest));
+    } finally {
+      setFlagsLoading(false);
+    }
   }
 
   async function refreshIntegrity() {
@@ -216,6 +238,36 @@ export default function AdminMasterPage() {
       setFundInfo(res.json);
     } finally {
       setFundLoading(false);
+    }
+  }
+
+  async function saveFlags() {
+    setFlagsErr(null);
+    setFlagsSaving(true);
+    try {
+      const res = await fetchJson("/api/admin/flags", {
+        method: "POST",
+        body: JSON.stringify({
+          pause_all: flagPauseAll,
+          pause_reserve: flagPauseReserve,
+          pause_stats_ingest: flagPauseStatsIngest,
+          updated_by: "operator",
+        }),
+      });
+
+      if (!res.ok || !res.json?.ok) {
+        setFlagsErr(res.json?.error ?? `flags_save_failed_${res.status}`);
+        setFlagsInfo(res.json);
+        return;
+      }
+
+      const f = res.json.flags;
+      setFlagsInfo(res.json);
+      setFlagPauseAll(Boolean(f?.pause_all));
+      setFlagPauseReserve(Boolean(f?.pause_reserve));
+      setFlagPauseStatsIngest(Boolean(f?.pause_stats_ingest));
+    } finally {
+      setFlagsSaving(false);
     }
   }
 
@@ -463,83 +515,91 @@ export default function AdminMasterPage() {
         )}
 
         {tab === "flags" && (
-          <Card title="Flags">
-            <div style={{ marginBottom: 10, opacity: 0.75, fontSize: 12 }}>
-              This tab will eventually provide toggle UI. For now it shows raw payload.
+          <Card title="Flags (Global Pause Switches)">
+            <div style={{ display: "flex", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+              <button
+                onClick={refreshFlags}
+                disabled={flagsLoading}
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  background: flagsLoading ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.35)",
+                  color: "#fff",
+                  cursor: flagsLoading ? "not-allowed" : "pointer",
+                  fontSize: 12,
+                }}
+              >
+                {flagsLoading ? "Loading…" : "Load"}
+              </button>
+
+              <button
+                onClick={saveFlags}
+                disabled={flagsSaving}
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  background: flagsSaving ? "rgba(255,255,255,0.08)" : "rgba(255,166,0,0.18)",
+                  color: "#fff",
+                  cursor: flagsSaving ? "not-allowed" : "pointer",
+                  fontSize: 12,
+                }}
+              >
+                {flagsSaving ? "Saving…" : "Save"}
+              </button>
+
+              <div style={{ fontSize: 12, opacity: 0.7, alignSelf: "center" }}>
+                These flags immediately affect spend/reserve/stats flows.
+              </div>
             </div>
-            {(() => {
-              const o = overviewInfo ?? null;
 
-              const since = o?.window?.since ?? null;
+            {flagsErr ? (
+              <div style={{ marginBottom: 10, color: "#ff6b6b", fontSize: 12 }}>
+                {flagsErr}
+              </div>
+            ) : null}
 
-              const protocolEvents = Number(o?.counts?.protocol_events_24h ?? 0);
-              const sessions = Number(o?.counts?.sessions_24h ?? 0);
-              const claims = Number(o?.counts?.claims_24h ?? 0);
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 10 }}>
+              <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, padding: 12, background: "rgba(0,0,0,0.35)" }}>
+                <div style={{ fontSize: 12, opacity: 0.75 }}>pause_all</div>
+                <label style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
+                  <input type="checkbox" checked={flagPauseAll} onChange={(e) => setFlagPauseAll(e.target.checked)} />
+                  <span style={{ fontSize: 12, opacity: 0.85 }}>
+                    Stops protocol actions (highest priority)
+                  </span>
+                </label>
+              </div>
 
-              const usdddSpent = Number(o?.money?.usddd_spent_24h ?? 0);
-              const fundTotal = Number(o?.money?.fund_total_usdt ?? 0);
+              <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, padding: 12, background: "rgba(0,0,0,0.35)" }}>
+                <div style={{ fontSize: 12, opacity: 0.75 }}>pause_reserve</div>
+                <label style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
+                  <input type="checkbox" checked={flagPauseReserve} onChange={(e) => setFlagPauseReserve(e.target.checked)} />
+                  <span style={{ fontSize: 12, opacity: 0.85 }}>
+                    Stops reserve/debit ledger writes
+                  </span>
+                </label>
+              </div>
 
-              const activePos = Number(o?.fund?.active_positions ?? 0);
-              const awaitingPos = Number(o?.fund?.awaiting_positions ?? 0);
+              <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, padding: 12, background: "rgba(0,0,0,0.35)" }}>
+                <div style={{ fontSize: 12, opacity: 0.75 }}>pause_stats_ingest</div>
+                <label style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
+                  <input type="checkbox" checked={flagPauseStatsIngest} onChange={(e) => setFlagPauseStatsIngest(e.target.checked)} />
+                  <span style={{ fontSize: 12, opacity: 0.85 }}>
+                    Stops stats_events ingestion
+                  </span>
+                </label>
+              </div>
+            </div>
 
-              const fmtInt = (n: number) => (Number.isFinite(n) ? n.toLocaleString() : "—");
-              const fmtMoney = (n: number) =>
-                Number.isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: 6 }) : "—";
-
-              return (
-                <>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
-                    <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, padding: 12, background: "rgba(0,0,0,0.35)" }}>
-                      <div style={{ fontSize: 12, opacity: 0.75 }}>Protocol Actions (24h)</div>
-                      <div style={{ fontSize: 22, fontWeight: 800, marginTop: 6 }}>{fmtInt(protocolEvents)}</div>
-                    </div>
-
-                    <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, padding: 12, background: "rgba(0,0,0,0.35)" }}>
-                      <div style={{ fontSize: 12, opacity: 0.75 }}>Sessions (24h)</div>
-                      <div style={{ fontSize: 22, fontWeight: 800, marginTop: 6 }}>{fmtInt(sessions)}</div>
-                    </div>
-
-                    <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, padding: 12, background: "rgba(0,0,0,0.35)" }}>
-                      <div style={{ fontSize: 12, opacity: 0.75 }}>Claims (24h)</div>
-                      <div style={{ fontSize: 22, fontWeight: 800, marginTop: 6 }}>{fmtInt(claims)}</div>
-                    </div>
-
-                    <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, padding: 12, background: "rgba(0,0,0,0.35)" }}>
-                      <div style={{ fontSize: 12, opacity: 0.75 }}>USDDD Spent (24h)</div>
-                      <div style={{ fontSize: 22, fontWeight: 800, marginTop: 6 }}>{fmtMoney(usdddSpent)}</div>
-                    </div>
-
-                    <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, padding: 12, background: "rgba(0,0,0,0.35)" }}>
-                      <div style={{ fontSize: 12, opacity: 0.75 }}>Fund Total (USDT)</div>
-                      <div style={{ fontSize: 22, fontWeight: 800, marginTop: 6 }}>{fmtMoney(fundTotal)}</div>
-                    </div>
-
-                    <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, padding: 12, background: "rgba(0,0,0,0.35)" }}>
-                      <div style={{ fontSize: 12, opacity: 0.75 }}>Fund Positions</div>
-                      <div style={{ fontSize: 22, fontWeight: 800, marginTop: 6 }}>
-                        {fmtInt(activePos)} <span style={{ fontSize: 12, opacity: 0.7, fontWeight: 600 }}>active</span>
-                      </div>
-                      <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>
-                        {fmtInt(awaitingPos)} awaiting
-                      </div>
-                    </div>
-                  </div>
-
-                  <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
-                    <div style={{ fontSize: 12, opacity: 0.65 }}>
-                      Window since: {since ? String(since) : "—"}
-                    </div>
-
-                    <details style={{ fontSize: 12, opacity: 0.9 }}>
-                      <summary style={{ cursor: "pointer" }}>View raw</summary>
-                      <div style={{ marginTop: 8 }}>
-                        <CodeBlock value={o ?? { note: "No data loaded yet." }} />
-                      </div>
-                    </details>
-                  </div>
-                </>
-              );
-            })()}
+            <div style={{ marginTop: 10 }}>
+              <details style={{ fontSize: 12, opacity: 0.9 }}>
+                <summary style={{ cursor: "pointer" }}>View raw</summary>
+                <div style={{ marginTop: 8 }}>
+                  <CodeBlock value={flagsInfo ?? { note: "Click Load to fetch flags." }} />
+                </div>
+              </details>
+            </div>
           </Card>
         )}
 

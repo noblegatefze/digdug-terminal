@@ -14,33 +14,42 @@ function isAuthed(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
-  if (!isAuthed(req)) return NextResponse.json({ ok: false }, { status: 401 });
+  if (!isAuthed(req)) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
 
-  const { data, error } = await supabase.rpc("rpc_admin_flags").single();
-  if (error || !data) return NextResponse.json({ ok: false, error: "read_failed" }, { status: 500 });
+  const { data, error } = await supabase
+    .from("dd_admin_flags")
+    .select("*")
+    .eq("id", true)
+    .single();
 
+  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true, flags: data });
 }
 
 export async function POST(req: NextRequest) {
-  if (!isAuthed(req)) return NextResponse.json({ ok: false }, { status: 401 });
+  if (!isAuthed(req)) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => null);
 
-  const patch = {
-    pause_all: Boolean(body?.pause_all),
-    pause_reserve: Boolean(body?.pause_reserve),
-    pause_stats_ingest: Boolean(body?.pause_stats_ingest),
-    updated_at: new Date().toISOString(),
-    updated_by: "admin",
-  };
+  const pause_all = Boolean(body?.pause_all);
+  const pause_reserve = Boolean(body?.pause_reserve);
+  const pause_stats_ingest = Boolean(body?.pause_stats_ingest);
 
-  const { error } = await supabase.from("dd_admin_flags").update(patch).eq("id", true);
-  if (error) return NextResponse.json({ ok: false, error: "write_failed" }, { status: 500 });
+  const updated_by = String(body?.updated_by ?? "admin").slice(0, 80);
 
-  // return canonical flags (RPC) after write
-  const { data, error: readErr } = await supabase.rpc("rpc_admin_flags").single();
-  if (readErr || !data) return NextResponse.json({ ok: false, error: "read_failed" }, { status: 500 });
+  const { data, error } = await supabase
+    .from("dd_admin_flags")
+    .update({
+      pause_all,
+      pause_reserve,
+      pause_stats_ingest,
+      updated_by,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", true)
+    .select("*")
+    .single();
 
+  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true, flags: data });
 }
