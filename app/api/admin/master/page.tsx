@@ -85,6 +85,8 @@ export default function AdminMasterPage() {
   const [userInfo, setUserInfo] = useState<any>(null);
   const [overviewInfo, setOverviewInfo] = useState<any>(null);
   const [overviewErr, setOverviewErr] = useState<string | null>(null);
+  const [integrityErr, setIntegrityErr] = useState<string | null>(null);
+  const [integrityLoading, setIntegrityLoading] = useState(false);
 
   const tabs = useMemo(
     () => [
@@ -147,10 +149,19 @@ export default function AdminMasterPage() {
   }
 
   async function refreshIntegrity() {
-    // Placeholder endpoint we’ll add next (one step later).
-    // For now you’ll see 404 until we create it.
-    const res = await fetchJson("/api/admin/metrics/integrity");
-    setIntegrityInfo(res.json);
+    setIntegrityErr(null);
+    setIntegrityLoading(true);
+    try {
+      const res = await fetchJson("/api/admin/metrics/integrity");
+      if (!res.ok) {
+        setIntegrityErr(res.json?.error ?? `integrity_failed_${res.status}`);
+        setIntegrityInfo(res.json);
+        return;
+      }
+      setIntegrityInfo(res.json);
+    } finally {
+      setIntegrityLoading(false);
+    }
   }
 
   async function refreshOverview() {
@@ -480,7 +491,7 @@ export default function AdminMasterPage() {
         )}
 
         {tab === "integrity" && (
-          <Card title="Integrity">
+          <Card title="Integrity (24h)">
             <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
               <button
                 onClick={refreshIntegrity}
@@ -488,23 +499,138 @@ export default function AdminMasterPage() {
                   padding: "8px 10px",
                   borderRadius: 10,
                   border: "1px solid rgba(255,255,255,0.14)",
-                  background: "rgba(0,0,0,0.35)",
+                  background: integrityLoading ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.35)",
                   color: "#fff",
-                  cursor: "pointer",
+                  cursor: integrityLoading ? "not-allowed" : "pointer",
                   fontSize: 12,
                 }}
+                disabled={integrityLoading}
               >
-                Load
+                {integrityLoading ? "Loading…" : "Load"}
               </button>
             </div>
-            <CodeBlock
-              value={
-                integrityInfo ?? {
-                  note:
-                    "Next step: create /api/admin/metrics/integrity (SQL-backed). Until then you may see 404 here.",
-                }
-              }
-            />
+
+            {integrityErr ? (
+              <div style={{ marginBottom: 10, color: "#ff6b6b", fontSize: 12 }}>
+                {integrityErr}
+              </div>
+            ) : null}
+
+            {(() => {
+              const o = integrityInfo ?? null;
+
+              // API returns: { ok, window: { since }, reserves_without_claim, claims_without_reserve, amount_mismatch, top_boxes... }
+              const since = o?.window?.since ?? null;
+
+              const rCnt = Number(o?.reserves_without_claim?.count ?? 0);
+              const rAmt = Number(o?.reserves_without_claim?.amount ?? 0);
+
+              const cCnt = Number(o?.claims_without_reserve?.count ?? 0);
+              const cAmt = Number(o?.claims_without_reserve?.amount ?? 0);
+
+              const mCnt = Number(o?.amount_mismatch?.count ?? 0);
+
+              const top = Array.isArray(o?.top_boxes_reserves_without_claim)
+                ? o.top_boxes_reserves_without_claim
+                : [];
+
+              const fmtInt = (n: number) => (Number.isFinite(n) ? n.toLocaleString() : "—");
+              const fmtMoney = (n: number) =>
+                Number.isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: 6 }) : "—";
+
+              const okColor =
+                rCnt === 0 && cCnt === 0 && mCnt === 0 ? "rgba(0,255,170,0.10)" : "rgba(255,166,0,0.10)";
+
+              return (
+                <>
+                  <div
+                    style={{
+                      border: "1px solid rgba(255,255,255,0.10)",
+                      borderRadius: 12,
+                      padding: 12,
+                      background: okColor,
+                      marginBottom: 10,
+                      fontSize: 12,
+                      opacity: 0.9,
+                    }}
+                  >
+                    Status:{" "}
+                    <b>
+                      {rCnt === 0 && cCnt === 0 && mCnt === 0 ? "CLEAN" : "ATTENTION"}
+                    </b>
+                    <span style={{ opacity: 0.7 }}> — Window since: {since ? String(since) : "—"}</span>
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10 }}>
+                    <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, padding: 12, background: "rgba(0,0,0,0.35)" }}>
+                      <div style={{ fontSize: 12, opacity: 0.75 }}>Reserves without Claim</div>
+                      <div style={{ fontSize: 22, fontWeight: 800, marginTop: 6 }}>{fmtInt(rCnt)}</div>
+                      <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>Amount: {fmtMoney(rAmt)}</div>
+                    </div>
+
+                    <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, padding: 12, background: "rgba(0,0,0,0.35)" }}>
+                      <div style={{ fontSize: 12, opacity: 0.75 }}>Claims without Reserve</div>
+                      <div style={{ fontSize: 22, fontWeight: 800, marginTop: 6 }}>{fmtInt(cCnt)}</div>
+                      <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>Amount: {fmtMoney(cAmt)}</div>
+                    </div>
+
+                    <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, padding: 12, background: "rgba(0,0,0,0.35)" }}>
+                      <div style={{ fontSize: 12, opacity: 0.75 }}>Amount Mismatches</div>
+                      <div style={{ fontSize: 22, fontWeight: 800, marginTop: 6 }}>{fmtInt(mCnt)}</div>
+                      <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>
+                        Expected: 0 (dig_id-linked)
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 8 }}>
+                      Top boxes (reserves without claim)
+                    </div>
+
+                    <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, overflow: "hidden" }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 120px 180px", gap: 0, padding: "10px 12px", background: "rgba(0,0,0,0.40)", fontSize: 12, opacity: 0.8 }}>
+                        <div>Box</div>
+                        <div>Count</div>
+                        <div>Amount</div>
+                      </div>
+
+                      {(top.length ? top : []).slice(0, 10).map((row: any, idx: number) => (
+                        <div
+                          key={idx}
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "1fr 120px 180px",
+                            padding: "10px 12px",
+                            borderTop: "1px solid rgba(255,255,255,0.08)",
+                            fontSize: 12,
+                          }}
+                        >
+                          <div>{String(row.box_id ?? "—")}</div>
+                          <div>{fmtInt(Number(row.cnt ?? 0))}</div>
+                          <div>{fmtMoney(Number(row.amount_sum ?? 0))}</div>
+                        </div>
+                      ))}
+
+                      {!top.length ? (
+                        <div style={{ padding: "10px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", fontSize: 12, opacity: 0.7 }}>
+                          No offenders found (good).
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: 10 }}>
+                    <details style={{ fontSize: 12, opacity: 0.9 }}>
+                      <summary style={{ cursor: "pointer" }}>View raw</summary>
+                      <div style={{ marginTop: 8 }}>
+                        <CodeBlock value={o ?? { note: "No data loaded yet." }} />
+                      </div>
+                    </details>
+                  </div>
+                </>
+              );
+            })()}
           </Card>
         )}
 
