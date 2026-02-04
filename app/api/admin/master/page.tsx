@@ -403,7 +403,79 @@ export default function AdminMasterPage() {
             <div style={{ marginBottom: 10, opacity: 0.75, fontSize: 12 }}>
               This tab will eventually provide toggle UI. For now it shows raw payload.
             </div>
-            <CodeBlock value={flagsInfo ?? { hint: "Click Refresh Flags (top-right), or we wire the correct endpoint next." }} />
+            {(() => {
+              const o = overviewInfo ?? null;
+
+              const since = o?.window?.since ?? null;
+
+              const protocolEvents = Number(o?.counts?.protocol_events_24h ?? 0);
+              const sessions = Number(o?.counts?.sessions_24h ?? 0);
+              const claims = Number(o?.counts?.claims_24h ?? 0);
+
+              const usdddSpent = Number(o?.money?.usddd_spent_24h ?? 0);
+              const fundTotal = Number(o?.money?.fund_total_usdt ?? 0);
+
+              const activePos = Number(o?.fund?.active_positions ?? 0);
+              const awaitingPos = Number(o?.fund?.awaiting_positions ?? 0);
+
+              const fmtInt = (n: number) => (Number.isFinite(n) ? n.toLocaleString() : "—");
+              const fmtMoney = (n: number) =>
+                Number.isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: 6 }) : "—";
+
+              return (
+                <>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+                    <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, padding: 12, background: "rgba(0,0,0,0.35)" }}>
+                      <div style={{ fontSize: 12, opacity: 0.75 }}>Protocol Actions (24h)</div>
+                      <div style={{ fontSize: 22, fontWeight: 800, marginTop: 6 }}>{fmtInt(protocolEvents)}</div>
+                    </div>
+
+                    <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, padding: 12, background: "rgba(0,0,0,0.35)" }}>
+                      <div style={{ fontSize: 12, opacity: 0.75 }}>Sessions (24h)</div>
+                      <div style={{ fontSize: 22, fontWeight: 800, marginTop: 6 }}>{fmtInt(sessions)}</div>
+                    </div>
+
+                    <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, padding: 12, background: "rgba(0,0,0,0.35)" }}>
+                      <div style={{ fontSize: 12, opacity: 0.75 }}>Claims (24h)</div>
+                      <div style={{ fontSize: 22, fontWeight: 800, marginTop: 6 }}>{fmtInt(claims)}</div>
+                    </div>
+
+                    <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, padding: 12, background: "rgba(0,0,0,0.35)" }}>
+                      <div style={{ fontSize: 12, opacity: 0.75 }}>USDDD Spent (24h)</div>
+                      <div style={{ fontSize: 22, fontWeight: 800, marginTop: 6 }}>{fmtMoney(usdddSpent)}</div>
+                    </div>
+
+                    <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, padding: 12, background: "rgba(0,0,0,0.35)" }}>
+                      <div style={{ fontSize: 12, opacity: 0.75 }}>Fund Total (USDT)</div>
+                      <div style={{ fontSize: 22, fontWeight: 800, marginTop: 6 }}>{fmtMoney(fundTotal)}</div>
+                    </div>
+
+                    <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, padding: 12, background: "rgba(0,0,0,0.35)" }}>
+                      <div style={{ fontSize: 12, opacity: 0.75 }}>Fund Positions</div>
+                      <div style={{ fontSize: 22, fontWeight: 800, marginTop: 6 }}>
+                        {fmtInt(activePos)} <span style={{ fontSize: 12, opacity: 0.7, fontWeight: 600 }}>active</span>
+                      </div>
+                      <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>
+                        {fmtInt(awaitingPos)} awaiting
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
+                    <div style={{ fontSize: 12, opacity: 0.65 }}>
+                      Window since: {since ? String(since) : "—"}
+                    </div>
+
+                    <details style={{ fontSize: 12, opacity: 0.9 }}>
+                      <summary style={{ cursor: "pointer" }}>View raw</summary>
+                      <div style={{ marginTop: 8 }}>
+                        <CodeBlock value={o ?? { note: "No data loaded yet." }} />
+                      </div>
+                    </details>
+                  </div>
+                </>
+              );
+            })()}
           </Card>
         )}
 
