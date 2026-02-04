@@ -97,6 +97,7 @@ export default function AdminMasterPage() {
   const [fundLoading, setFundLoading] = useState(false);
   const [fundLimit, setFundLimit] = useState(50);
   const [fundInfo, setFundInfo] = useState<any>(null);
+
   const [flagsErr, setFlagsErr] = useState<string | null>(null);
   const [flagsLoading, setFlagsLoading] = useState(false);
   const [flagsSaving, setFlagsSaving] = useState(false);
@@ -104,6 +105,8 @@ export default function AdminMasterPage() {
   const [flagPauseAll, setFlagPauseAll] = useState(false);
   const [flagPauseReserve, setFlagPauseReserve] = useState(false);
   const [flagPauseStatsIngest, setFlagPauseStatsIngest] = useState(false);
+
+  const [globalPaused, setGlobalPaused] = useState(false);
 
   const tabs = useMemo(
     () => [
@@ -175,6 +178,7 @@ export default function AdminMasterPage() {
       setFlagPauseAll(Boolean(f?.pause_all));
       setFlagPauseReserve(Boolean(f?.pause_reserve));
       setFlagPauseStatsIngest(Boolean(f?.pause_stats_ingest));
+      setGlobalPaused(Boolean(f?.pause_all));
     } finally {
       setFlagsLoading(false);
     }
@@ -266,6 +270,7 @@ export default function AdminMasterPage() {
       setFlagPauseAll(Boolean(f?.pause_all));
       setFlagPauseReserve(Boolean(f?.pause_reserve));
       setFlagPauseStatsIngest(Boolean(f?.pause_stats_ingest));
+      setGlobalPaused(Boolean(f?.pause_all));
     } finally {
       setFlagsSaving(false);
     }
@@ -379,6 +384,30 @@ export default function AdminMasterPage() {
           "radial-gradient(1200px 800px at 20% 0%, rgba(255,166,0,0.10), transparent), radial-gradient(900px 700px at 80% 20%, rgba(0,170,255,0.10), transparent), #07090d",
       }}
     >
+      {globalPaused ? (
+        <div
+          style={{
+            marginBottom: 12,
+            padding: "10px 12px",
+            borderRadius: 12,
+            border: "1px solid rgba(255,80,80,0.45)",
+            background: "rgba(255,80,80,0.15)",
+            color: "#fff",
+            fontSize: 12,
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+          }}
+        >
+          <span style={{ fontWeight: 900, letterSpacing: 0.6 }}>
+            🚨 GLOBAL PAUSED
+          </span>
+          <span style={{ opacity: 0.85 }}>
+            pause_all is enabled. Terminal activity is blocked.
+          </span>
+        </div>
+      ) : null}
+
       <div style={{ display: "flex", alignItems: "baseline", gap: 14 }}>
         <div style={{ fontSize: 14, opacity: 0.85 }}>DIGDUG.DO</div>
         <div style={{ fontSize: 20, fontWeight: 700 }}>Operator Console</div>
