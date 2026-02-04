@@ -19,11 +19,12 @@ export async function POST(req: NextRequest) {
 
   const username = String(body?.username ?? "").trim();
   const box_id = String(body?.box_id ?? "").trim();
+  const dig_id = String(body?.dig_id ?? "").trim(); // ✅ REQUIRED linkage key (box_id + dig_id)
 
-  // amount is the ONLY value we accept from the client for claim creation
+  // amount is the ONLY numeric value we accept from the client for claim creation
   const amount = asNum(body?.amount);
 
-  if (!username || !box_id || amount == null || amount <= 0) {
+  if (!username || !box_id || !dig_id || amount == null || amount <= 0) {
     return NextResponse.json({ error: "Missing/invalid fields" }, { status: 400 });
   }
 
@@ -57,11 +58,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Box not configured" }, { status: 400 });
   }
 
-  // 3) insert claim (server-resolved chain/token fields)
+  // 3) insert claim (server-resolved chain/token fields) with dig_id
+  // DB has a UNIQUE index on (box_id, dig_id) where dig_id is not null
+  // So if the client retries, we treat it as idempotent (return ok: true).
   const { error } = await supabase.from("dd_treasure_claims").insert({
     user_id: user.id,
     username: user.username,
     box_id,
+    dig_id, // ✅ NEW
     chain_id,
     token_address,
     token_symbol,
@@ -70,6 +74,12 @@ export async function POST(req: NextRequest) {
   });
 
   if (error) {
+    // Idempotency: duplicate claim for same (box_id, dig_id)
+    // Postgres unique violation code is 23505 (Supabase exposes it on error.code sometimes).
+    const code = (error as any)?.code;
+    if (code === "23505") {
+      return NextResponse.json({ ok: true, deduped: true });
+    }
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 

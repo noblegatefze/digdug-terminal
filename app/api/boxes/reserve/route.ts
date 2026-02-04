@@ -68,32 +68,53 @@ async function fetchCmcUsdPrice(cmcId: number): Promise<number | null> {
 export async function POST(req: NextRequest) {
   // EMERGENCY PAUSE
   if (process.env.DIGDUG_PAUSE === "1") {
-    return NextResponse.json(
-      { ok: false, error: "Protocol temporarily paused." },
-      { status: 503 }
-    );
+    return NextResponse.json({ ok: false, error: "Protocol temporarily paused." }, { status: 503 });
   }
 
   // ADMIN PANEL PAUSE
   if (await isReservePaused()) {
-    return NextResponse.json(
-      { ok: false, error: "reserve_paused" },
-      { status: 503 }
-    );
+    return NextResponse.json({ ok: false, error: "reserve_paused" }, { status: 503 });
   }
 
   const body = await req.json().catch(() => null);
 
   const username = String(body?.username ?? "").trim();
   const box_id = String(body?.box_id ?? "").trim();
-  const dig_id = String(body?.dig_id ?? "").trim(); // REQUIRED for idempotency
+  const dig_id = String(body?.dig_id ?? "").trim(); // REQUIRED for idempotency + linkage
   const amount = asNum(body?.amount);
 
   if (!username || !box_id || !dig_id || amount == null || amount <= 0) {
     return NextResponse.json({ ok: false, error: "Missing/invalid fields" }, { status: 400 });
   }
 
-  // resolve cmc_id from box meta (same as before)
+  // ✅ HARD GATE: A reserve is only valid if the claim exists.
+  // This permanently prevents "reserve-only" orphans.
+  const { data: claim, error: cerr } = await supabase
+    .from("dd_treasure_claims")
+    .select("id, amount")
+    .eq("box_id", box_id)
+    .eq("dig_id", dig_id)
+    .maybeSingle();
+
+  if (cerr) {
+    return NextResponse.json({ ok: false, error: "claim_lookup_failed" }, { status: 500 });
+  }
+
+  if (!claim) {
+    // The dig did not finalize into a claim (or the client is calling reserve too early).
+    // Treat as non-fatal for client: reserve simply not allowed.
+    return NextResponse.json({ ok: false, error: "claim_required" }, { status: 409 });
+  }
+
+  // Optional: enforce exact amount match (prevents drift / bad clients)
+  if (Number(claim.amount) !== Number(amount)) {
+    return NextResponse.json(
+      { ok: false, error: "amount_mismatch", expected: claim.amount, got: amount },
+      { status: 400 }
+    );
+  }
+
+  // Resolve cmc_id from box meta
   const { data: box, error: berr } = await supabase
     .from("dd_boxes")
     .select("id, meta")
@@ -110,6 +131,8 @@ export async function POST(req: NextRequest) {
   const price_at = new Date().toISOString();
 
   // Atomic reserve + debit inside DB transaction
+  // NOTE: DB now has a UNIQUE index on (box_id, meta->>'dig_id') for claim_reserve,
+  // so repeated calls become safe (the RPC should handle conflict / idempotency).
   const { data, error } = await supabase.rpc("rpc_dig_reserve", {
     p_username: username,
     p_box_id: box_id,
@@ -121,12 +144,13 @@ export async function POST(req: NextRequest) {
   });
 
   if (error) {
+    // If the RPC attempts to insert duplicate reserve rows, the DB unique index will block it.
+    // We return a stable error message to the client.
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
 
   const out: any = data;
   if (!out?.ok) {
-    // pass through known structured errors
     return NextResponse.json(out ?? { ok: false, error: "reserve_failed" }, { status: 400 });
   }
 
