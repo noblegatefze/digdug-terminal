@@ -87,6 +87,8 @@ export default function AdminMasterPage() {
   const [overviewErr, setOverviewErr] = useState<string | null>(null);
   const [integrityErr, setIntegrityErr] = useState<string | null>(null);
   const [integrityLoading, setIntegrityLoading] = useState(false);
+  const [userErr, setUserErr] = useState<string | null>(null);
+  const [userLoading, setUserLoading] = useState(false);
 
   const tabs = useMemo(
     () => [
@@ -176,10 +178,19 @@ export default function AdminMasterPage() {
   }
 
   async function lookupUser() {
-    // Placeholder endpoint we’ll add next.
-    // For now you’ll see 404 until we create it.
-    const res = await fetchJson(`/api/admin/metrics/user?username=${encodeURIComponent(userQuery)}`);
-    setUserInfo(res.json);
+    setUserErr(null);
+    setUserLoading(true);
+    try {
+      const res = await fetchJson(`/api/admin/metrics/user?username=${encodeURIComponent(userQuery)}`);
+      if (!res.ok || !res.json?.ok) {
+        setUserErr(res.json?.error ?? `user_lookup_failed_${res.status}`);
+        setUserInfo(res.json);
+        return;
+      }
+      setUserInfo(res.json);
+    } finally {
+      setUserLoading(false);
+    }
   }
 
   if (!ready) {
@@ -651,34 +662,193 @@ export default function AdminMasterPage() {
                   outline: "none",
                   fontSize: 12,
                 }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") lookupUser();
+                }}
               />
               <button
                 onClick={lookupUser}
-                disabled={!userQuery}
+                disabled={!userQuery || userLoading}
                 style={{
                   padding: "10px 12px",
                   borderRadius: 10,
                   border: "1px solid rgba(255,255,255,0.14)",
-                  background: "rgba(0,0,0,0.35)",
+                  background: userLoading ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.35)",
                   color: "#fff",
-                  cursor: "pointer",
+                  cursor: userLoading ? "not-allowed" : "pointer",
                   fontSize: 12,
+                  whiteSpace: "nowrap",
                 }}
               >
-                Lookup
+                {userLoading ? "Loading…" : "Lookup"}
               </button>
             </div>
-            <CodeBlock
-              value={
-                userInfo ?? {
-                  note:
-                    "Next step: create /api/admin/metrics/user?username=... returning user_state, last spends, last claims.",
-                }
-              }
-            />
+
+            {userErr ? (
+              <div style={{ marginBottom: 10, color: "#ff6b6b", fontSize: 12 }}>
+                {userErr}
+              </div>
+            ) : null}
+
+            {(() => {
+              const o = userInfo ?? null;
+              const user = o?.user ?? null;
+              const state = o?.state ?? null;
+              const spends = Array.isArray(o?.spends) ? o.spends : [];
+              const claims = Array.isArray(o?.claims) ? o.claims : [];
+
+              const fmtInt = (n: any) =>
+                Number.isFinite(Number(n)) ? Number(n).toLocaleString() : "—";
+              const fmtMoney = (n: any) =>
+                Number.isFinite(Number(n))
+                  ? Number(n).toLocaleString(undefined, { maximumFractionDigits: 6 })
+                  : "—";
+
+              const header = user
+                ? `${user.username}  •  ${String(user.id).slice(0, 8)}…`
+                : "No user loaded";
+
+              return (
+                <>
+                  <div style={{ marginBottom: 10, fontSize: 12, opacity: 0.85 }}>
+                    <b>{header}</b>
+                    {user?.created_at ? (
+                      <span style={{ opacity: 0.7 }}>
+                        {" "}
+                        — created {String(user.created_at)}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                      gap: 10,
+                      marginBottom: 12,
+                    }}
+                  >
+                    <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, padding: 12, background: "rgba(0,0,0,0.35)" }}>
+                      <div style={{ fontSize: 12, opacity: 0.75 }}>USDDD Allocated</div>
+                      <div style={{ fontSize: 22, fontWeight: 800, marginTop: 6 }}>{fmtMoney(state?.usddd_allocated)}</div>
+                    </div>
+
+                    <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, padding: 12, background: "rgba(0,0,0,0.35)" }}>
+                      <div style={{ fontSize: 12, opacity: 0.75 }}>USDDD Acquired</div>
+                      <div style={{ fontSize: 22, fontWeight: 800, marginTop: 6 }}>{fmtMoney(state?.usddd_acquired)}</div>
+                    </div>
+
+                    <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, padding: 12, background: "rgba(0,0,0,0.35)" }}>
+                      <div style={{ fontSize: 12, opacity: 0.75 }}>Digs / Finds</div>
+                      <div style={{ fontSize: 22, fontWeight: 800, marginTop: 6 }}>
+                        {fmtInt(state?.digs_count)} / {fmtInt(state?.finds_count)}
+                      </div>
+                    </div>
+
+                    <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, padding: 12, background: "rgba(0,0,0,0.35)" }}>
+                      <div style={{ fontSize: 12, opacity: 0.75 }}>Last Updated</div>
+                      <div style={{ fontSize: 12, marginTop: 8, opacity: 0.85 }}>
+                        {state?.updated_at ? String(state.updated_at) : "—"}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 12 }}>
+                    <div>
+                      <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 8 }}>
+                        Last 50 USDDD spends
+                      </div>
+
+                      <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, overflow: "hidden" }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "140px 120px 1fr 120px", padding: "10px 12px", background: "rgba(0,0,0,0.40)", fontSize: 12, opacity: 0.8 }}>
+                          <div>Time</div>
+                          <div>Type</div>
+                          <div>Box</div>
+                          <div>USDDD</div>
+                        </div>
+
+                        {spends.slice(0, 50).map((r: any, idx: number) => (
+                          <div
+                            key={idx}
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "140px 120px 1fr 120px",
+                              padding: "10px 12px",
+                              borderTop: "1px solid rgba(255,255,255,0.08)",
+                              fontSize: 12,
+                            }}
+                          >
+                            <div style={{ opacity: 0.85 }}>{String(r.created_at ?? "").slice(0, 16)}</div>
+                            <div>{String(r.spend_type ?? "—")}</div>
+                            <div style={{ opacity: 0.85 }}>{String(r.box_id ?? "—")}</div>
+                            <div>{fmtMoney(r.usddd_amount)}</div>
+                          </div>
+                        ))}
+
+                        {!spends.length ? (
+                          <div style={{ padding: "10px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", fontSize: 12, opacity: 0.7 }}>
+                            No spend rows found.
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 8 }}>
+                        Last 50 treasure claims
+                      </div>
+
+                      <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, overflow: "hidden" }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "140px 90px 90px 1fr 120px", padding: "10px 12px", background: "rgba(0,0,0,0.40)", fontSize: 12, opacity: 0.8 }}>
+                          <div>Time</div>
+                          <div>Chain</div>
+                          <div>Token</div>
+                          <div>Box</div>
+                          <div>Amount</div>
+                        </div>
+
+                        {claims.slice(0, 50).map((r: any, idx: number) => (
+                          <div
+                            key={idx}
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "140px 90px 90px 1fr 120px",
+                              padding: "10px 12px",
+                              borderTop: "1px solid rgba(255,255,255,0.08)",
+                              fontSize: 12,
+                            }}
+                          >
+                            <div style={{ opacity: 0.85 }}>{String(r.created_at ?? "").slice(0, 16)}</div>
+                            <div>{String(r.chain_id ?? "—")}</div>
+                            <div>{String(r.token_symbol ?? "—")}</div>
+                            <div style={{ opacity: 0.85 }}>{String(r.box_id ?? "—")}</div>
+                            <div>{fmtMoney(r.amount)}</div>
+                          </div>
+                        ))}
+
+                        {!claims.length ? (
+                          <div style={{ padding: "10px 12px", borderTop: "1px solid rgba(255,255,255,0.08)", fontSize: 12, opacity: 0.7 }}>
+                            No claim rows found.
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: 10 }}>
+                    <details style={{ fontSize: 12, opacity: 0.9 }}>
+                      <summary style={{ cursor: "pointer" }}>View raw</summary>
+                      <div style={{ marginTop: 8 }}>
+                        <CodeBlock value={o ?? { note: "No data loaded yet." }} />
+                      </div>
+                    </details>
+                  </div>
+                </>
+              );
+            })()}
           </Card>
         )}
-
+        
         {tab === "boxes" && (
           <Card title="Boxes">
             <CodeBlock
