@@ -87,31 +87,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Missing/invalid fields" }, { status: 400 });
   }
 
-  // ✅ HARD GATE: A reserve is only valid if the claim exists.
-  // This permanently prevents "reserve-only" orphans.
-  const { data: claim, error: cerr } = await supabase
-    .from("dd_treasure_claims")
-    .select("id, amount")
+  // ✅ Idempotency guard: if reserve already exists for (box_id, dig_id, username), return ok.
+  // NOTE: rpc_dig_reserve should already be idempotent, but this makes the API stable.
+  const { count: rcount, error: rerr } = await supabase
+    .from("dd_box_ledger")
+    .select("id", { head: true, count: "estimated" })
     .eq("box_id", box_id)
-    .eq("dig_id", dig_id)
-    .maybeSingle();
+    .eq("entry_type", "claim_reserve")
+    .filter("meta->>dig_id", "eq", dig_id)
+    .filter("meta->>username", "eq", username);
 
-  if (cerr) {
-    return NextResponse.json({ ok: false, error: "claim_lookup_failed" }, { status: 500 });
+  if (rerr) {
+    return NextResponse.json({ ok: false, error: "reserve_lookup_failed" }, { status: 500 });
   }
-
-  if (!claim) {
-    // The dig did not finalize into a claim (or the client is calling reserve too early).
-    // Treat as non-fatal for client: reserve simply not allowed.
-    return NextResponse.json({ ok: false, error: "claim_required" }, { status: 409 });
-  }
-
-  // Optional: enforce exact amount match (prevents drift / bad clients)
-  if (Number(claim.amount) !== Number(amount)) {
-    return NextResponse.json(
-      { ok: false, error: "amount_mismatch", expected: claim.amount, got: amount },
-      { status: 400 }
-    );
+  if ((rcount ?? 0) > 0) {
+    return NextResponse.json({ ok: true, deduped: true, note: "reserve_already_exists" });
   }
 
   // Resolve cmc_id from box meta

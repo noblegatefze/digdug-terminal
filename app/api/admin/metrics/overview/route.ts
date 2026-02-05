@@ -22,8 +22,8 @@ export async function GET(req: NextRequest) {
   try {
     // Protocol actions & sessions via stats_events
     const [{ count: events24h }, { count: sessions24h }] = await Promise.all([
-      supabase.from("stats_events").select("*", { count: "exact", head: true }).gte("created_at", since),
-      supabase.from("dd_sessions").select("*", { count: "exact", head: true }).gte("created_at", since),
+      supabase.from("stats_events").select("*", { count: "estimated", head: true }).gte("created_at", since),
+      supabase.from("dd_sessions").select("*", { count: "estimated", head: true }).gte("created_at", since),
     ]);
 
     // USDDD spent (canonical) via spend ledger
@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
     // Claims value (USD) is not computed here; keep it raw (we can add snapshot pricing later)
     const { count: claims24h } = await supabase
       .from("dd_treasure_claims")
-      .select("*", { count: "exact", head: true })
+      .select("*", { count: "estimated", head: true })
       .gte("created_at", since);
 
     // Fund totals (global)

@@ -24,7 +24,6 @@ async function resolveTerminalUserId(supabase: any, username?: string | null): P
 const ALLOWED_EVENTS = new Set([
   "session_start",
   "dig_attempt",
-  "dig_success",
   "withdraw",
   "box_create",
   "box_activate",
@@ -95,6 +94,10 @@ export async function POST(req: Request) {
     if (!event || !ALLOWED_EVENTS.has(event)) {
       return NextResponse.json({ ok: false, error: "invalid_event" }, { status: 400 });
     }
+    // HARD STOP: client must never emit dig_success telemetry (server-authoritative only)
+    if (event === "dig_success") {
+      return NextResponse.json({ ok: false, error: "dig_success_not_accepted" }, { status: 400 });
+    }
 
     // Create supabase client only after validation
     const supabase = createClient(url, key, { auth: { persistSession: false } });
@@ -107,26 +110,6 @@ export async function POST(req: Request) {
 
     // Optional idempotency: dig_id is the best stable key if client sends it
     const dig_id = typeof (body as any)?.dig_id === "string" ? String((body as any).dig_id).trim() : null;
-
-    // Soft global throttle (keeps DB safe if a client goes nuts)
-    // NOTE: This is telemetry throttle only. Canonical debits are protected by rpc_dig_reserve.
-    if (event === "dig_success") {
-      try {
-        const since = new Date(Date.now() - DIG_SUCCESS_WINDOW_SEC * 1000).toISOString();
-
-        const { count } = await supabase
-          .from("stats_events")
-          .select("id", { count: "exact", head: true })
-          .eq("event", "dig_success")
-          .gte("created_at", since);
-
-        if ((count ?? 0) > DIG_SUCCESS_CAP_PER_MIN) {
-          return NextResponse.json({ ok: true, throttled: true }, { status: 200 });
-        }
-      } catch {
-        // ignore throttle failures; telemetry should not break gameplay
-      }
-    }
 
     // If dig_id exists, prevent duplicate dig_success writes (telemetry hygiene)
     if (event === "dig_success" && dig_id) {

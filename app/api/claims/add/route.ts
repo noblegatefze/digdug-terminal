@@ -23,7 +23,7 @@ async function hasReserve(box_id: string, dig_id: string, username: string): Pro
   // and also meta->>username = <username> to prevent reusing someone else's dig_id.
   const { count, error } = await supabase
     .from("dd_box_ledger")
-    .select("id", { head: true, count: "exact" })
+    .select("id", { head: true, count: "estimated" })
     .eq("box_id", box_id)
     .eq("entry_type", "claim_reserve")
     .filter("meta->>dig_id", "eq", dig_id)
@@ -36,7 +36,7 @@ async function hasReserve(box_id: string, dig_id: string, username: string): Pro
 async function claimAlreadyExists(box_id: string, dig_id: string): Promise<boolean> {
   const { count, error } = await supabase
     .from("dd_treasure_claims")
-    .select("id", { head: true, count: "exact" })
+    .select("id", { head: true, count: "estimated" })
     .eq("box_id", box_id)
     .eq("dig_id", dig_id);
 

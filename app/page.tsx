@@ -2318,16 +2318,6 @@ export default function Page() {
     emit("sys", "Nice. Stay sharp - every dig counts.");
 
     const boxBefore = availableBalance(campaign);
-    const rewardAmt = computeReward(campaign);
-    const sym = campaign.tokenSymbol ?? "TOKEN";
-    let tier = findTier(campaign, rewardAmt); // fallback if no price
-    const digId = uid("dig");
-
-    // real USD price from CMC (cached)
-    const usdPrice = await getCmcPriceUsdCached(String(campaign.id));
-
-    const realUsd = usdPrice != null ? (rewardAmt * usdPrice) : null;
-    if (realUsd != null) tier = findTierByUsd(realUsd);
 
     // EMERGENCY PAUSE: stop all spend/reserve actions (bot kill-switch)
     if (process.env.NEXT_PUBLIC_DIGDUG_PAUSE === "1") {
@@ -2335,82 +2325,77 @@ export default function Page() {
       return;
     }
 
-    if (authedUser) {
-      // 1) Persist CLAIM first (now includes dig_id)
-      try {
-        fetch("/api/claims/add", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            username: authedUser,
-            box_id: campaign.id,
-            dig_id: digId,              // ✅ REQUIRED
-            amount: rewardAmt,
-          }),
-        }).catch(() => { });
-      } catch {
-        // ignore
-      }
-
-      // 2) Then reserve in DB ledger (claim-gated by dig_id)
-      try {
-        fetch("/api/boxes/reserve", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            username: authedUser,
-            box_id: campaign.id,
-            dig_id: digId,              // ✅ linkage
-            amount: rewardAmt,
-          }),
-        }).catch(() => { });
-      } catch {
-        // ignore
-      }
+    if (!authedUser) {
+      emit("warn", "Please log in again.");
+      return;
     }
 
-    // claim record for correct withdrawals
-    if (authedUser) {
-      const newClaim: TreasureClaim = {
-        id: uid("clm"),
-        user: authedUser,
-        kind: "TREASURE",
-        campaignId: campaign.id,
-        chainId: campaign.deployChainId,
-        tokenAddress: campaign.tokenAddress ?? "UNBOUND",
-        tokenSymbol: sym,
-        amount: rewardAmt,
-        status: "CLAIMED",
-        createdAt: Date.now(),
-        createdAtStr: nowLocalDateTime(),
-      };
-      // persist claim to DB (fire-and-forget)
-      try {
-        fetch("/api/claims/add", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            username: authedUser,
-            box_id: campaign.id,
-            chain_id: campaign.deployChainId,
-            token_address: campaign.tokenAddress ?? "UNBOUND",
-            token_symbol: sym,
-            amount: rewardAmt,
-          }),
-        }).catch(() => { });
-      } catch {
-        // ignore
-      }
-      setClaims((prev) => {
-        const next = [...prev, newClaim];
-        setTreasureBalances(recomputeTreasureBalancesForUser(authedUser, next));
-        return next;
+    // Call canonical server dig (server computes reward + writes reserve + writes claim)
+    let digId = uid("dig"); // local fallback for UI record id
+    let rewardAmt = 0;
+    let sym = campaign.tokenSymbol ?? "TOKEN";
+    let usdPrice: number | null = null;
+
+    try {
+      const r = await fetch("/api/dig/execute", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          username: authedUser,
+          box_id: campaign.id,
+        }),
       });
+
+      const out = (await r.json().catch(() => null)) as any;
+
+      if (!r.ok || !out?.ok) {
+        emit("warn", `Dig failed (${out?.error ?? `HTTP ${r.status}`}). No fuel spent.`);
+        return;
+      }
+
+      digId = String(out.dig_id ?? digId);
+      rewardAmt = Number(out.reward_amount ?? 0);
+      sym = String(out.token_symbol ?? sym);
+
+      // optional: if server ever returns pricing later
+      usdPrice = out?.reward_price_usd != null ? Number(out.reward_price_usd) : null;
+    } catch (e: any) {
+      emit("warn", `Dig failed (network). No fuel spent.`);
+      return;
     }
+
+    // UI tiering (price optional)
+    let tier = findTier(campaign, rewardAmt);
+    const realUsd = usdPrice != null ? rewardAmt * usdPrice : null;
+    if (realUsd != null) tier = findTierByUsd(realUsd);
+
+    // --- Update UI state from canonical result ---
+
+    // Add claim to UI (DB already has the authoritative record)
+    const newClaim: TreasureClaim = {
+      id: uid("clm"),
+      user: authedUser,
+      kind: "TREASURE",
+      campaignId: campaign.id,
+      chainId: campaign.deployChainId,
+      tokenAddress: campaign.tokenAddress ?? "UNBOUND",
+      tokenSymbol: sym,
+      amount: rewardAmt,
+      status: "CLAIMED",
+      createdAt: Date.now(),
+      createdAtStr: nowLocalDateTime(),
+    };
+
+    setClaims((prev) => {
+      const next = [...prev, newClaim];
+      setTreasureBalances(recomputeTreasureBalancesForUser(authedUser, next));
+      return next;
+    });
 
     // simple holdings
     setTreasureBalances((b) => ({ ...b, [sym]: (b[sym] ?? 0) + rewardAmt }));
 
+    // record dig history (UI only)
     const record: DigRecord = {
       id: digId,
       at: nowLocalDateTime(),
@@ -2422,33 +2407,28 @@ export default function Page() {
       rewardMode: campaign.rewardMode,
       rewardUsdPrice: usdPrice,
       rewardUsdValue: realUsd,
-
     };
-    setDigHistory((h) => [...h, record]);
 
-    // keep ref in sync so `status` shows correct Digs immediately
+    setDigHistory((h) => [...h, record]);
     digHistoryRef.current = [...digHistoryRef.current, record] as any;
 
     // NEW: status counters (live)
     digsCountRef.current = (Number.isFinite(digsCountRef.current) ? digsCountRef.current : 0) + 1;
-
-    // UI polish: update finds immediately; DB remains authoritative on refresh
     if (rewardAmt > 0) {
       findsCountRef.current = (Number.isFinite(findsCountRef.current) ? findsCountRef.current : 0) + 1;
     }
 
-    await sendStat("dig_success", {
-      terminal_user_id: terminalUserIdRef.current,
-      box_id: campaign.id,
-      chain: campaign.deployChainId,
-      token_symbol: sym,
-      usddd_cost: campaign.costUSDDD,
-      reward_amount: rewardAmt,
-      priced: usdPrice != null && usdPrice > 0,
-      reward_price_usd: (usdPrice != null && usdPrice > 0) ? usdPrice : null,
-      reward_value_usd: (usdPrice != null && usdPrice > 0) ? (rewardAmt * usdPrice) : null,
-    });
+    // keep UI line “(~$X)” but make it honest
+    try {
+      if (realUsd != null) emit("ok", `${tier} - +${rewardAmt.toFixed(6)} ${sym} (~$${fmtUsdValue(realUsd)})`);
+      else emit("ok", `${tier} - +${rewardAmt.toFixed(6)} ${sym}`);
+    } catch {
+      // ignore
+    }
 
+    emit("sys", `Fuel remaining: ${usdddTotalRef.current.toFixed(2)} USDDD`);
+    const boxAfter = Math.max(0, boxBefore - rewardAmt);
+    emit("sys", `Box remaining: ${boxAfter.toFixed(6)} ${sym}`);
 
     // NOTE (v0.2.0.11): dd_user_state is DB-authoritative via stats ingest RPC; no client snapshot writes here.
 
@@ -2493,18 +2473,6 @@ export default function Page() {
         })
         .catch(() => { });
     }
-
-    // keep UI line “(~$X)” but make it honest
-    try {
-      if (realUsd != null) emit("ok", `${tier} - +${rewardAmt.toFixed(6)} ${sym} (~$${fmtUsdValue(realUsd)})`);
-      else emit("ok", `${tier} - +${rewardAmt.toFixed(6)} ${sym}`);
-    } catch {
-      // ignore
-    }
-
-    emit("sys", `Fuel remaining: ${usdddTotalRef.current.toFixed(2)} USDDD`);
-    const boxAfter = Math.max(0, boxBefore - rewardAmt);
-    emit("sys", `Box remaining: ${boxAfter.toFixed(6)} ${sym}`);
 
   };
 
@@ -2566,22 +2534,8 @@ export default function Page() {
       return;
     }
 
-    // spend priority: Allocated -> Acquired
-    const cost = campaign.costUSDDD;
-    const allocNow = usdddAllocatedRef.current;
-    const takeAllocated = Math.min(allocNow, cost);
-    const takeAcquired = Math.max(0, cost - takeAllocated);
-
-    const nextAllocated = Math.max(0, allocNow - takeAllocated);
-    const nextAcquired = Math.max(0, usdddAcquiredRef.current - takeAcquired);
-    const nextTreasury = treasuryUSDDD + cost;
-
-    setUsdddAllocated(nextAllocated);
-    setUsdddAcquired(nextAcquired);
-    setTreasuryUSDDD(nextTreasury);
-
-
     await performDig(campaign);
+
   };
 
   // Withdraw
