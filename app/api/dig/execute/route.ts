@@ -9,11 +9,6 @@ function env(name: string) {
 
 const sb = createClient(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY"));
 
-function asNum(v: any): number | null {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
 function uid(prefix = "dig") {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
 }
@@ -40,6 +35,39 @@ function computeRewardFromBox(box: any): number {
   const b = Math.max(lo, hi);
   const v = a + (b - a) * rand01();
   return Math.max(0, v);
+}
+
+/**
+ * Tier by USD (canonical for DB)
+ * Bands (from your UI): <1, <4, <10, <25, else mega
+ */
+function findTierByUsd(realUsd: number) {
+  if (!Number.isFinite(realUsd) || realUsd < 0) return "FIND";
+  if (realUsd < 1) return "BASE FIND";
+  if (realUsd < 4) return "LOW FIND";
+  if (realUsd < 10) return "MEDIUM FIND";
+  if (realUsd < 25) return "HIGH FIND";
+  return "MEGA FIND";
+}
+
+/**
+ * Get latest address-based USD price for (chain_id, token_address).
+ * Returns null if not found.
+ */
+async function getLatestAddrPriceUsd(chain_id: string, token_address: string): Promise<number | null> {
+  // Try exact match first
+  const { data, error } = await sb
+    .from("dd_token_price_snapshots_addr")
+    .select("price_usd, as_of")
+    .eq("chain_id", chain_id)
+    .eq("token_address", token_address)
+    .order("as_of", { ascending: false })
+    .limit(1);
+
+  if (error) return null;
+  const row = data?.[0];
+  const price = row ? Number(row.price_usd) : NaN;
+  return Number.isFinite(price) ? price : null;
 }
 
 export async function POST(req: NextRequest) {
@@ -91,9 +119,9 @@ export async function POST(req: NextRequest) {
 
     // 3) Compute reward server-side
     const reward_amount = computeRewardFromBox(box);
-    const chain_id = String(box.deploy_chain_id ?? "").trim();
+    const chain_id = String(box.deploy_chain_id ?? "").trim().toUpperCase();
     const token_address = String(box.token_address ?? "").trim();
-    const token_symbol = String(box.token_symbol ?? "").trim();
+    const token_symbol = String(box.token_symbol ?? "").trim().toUpperCase();
 
     if (!chain_id || !token_address || !token_symbol) {
       return NextResponse.json({ ok: false, error: "box_not_configured" }, { status: 400 });
@@ -103,7 +131,6 @@ export async function POST(req: NextRequest) {
     const dig_id = uid("dig");
 
     // 5) Reserve (canonical debit + reserve) FIRST
-    // Reuse existing reserve API semantics via RPC directly here (best).
     const { data: rdata, error: rerr } = await sb.rpc("rpc_dig_reserve", {
       p_username: username,
       p_box_id: box_id,
@@ -122,7 +149,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(out ?? { ok: false, error: "reserve_failed" }, { status: 400 });
     }
 
-    // 6) Insert claim after reserve (use same rules as /api/claims/add but inline)
+    // 6) Compute USD + tier (best-effort; never blocks claim)
+    let price_usd: number | null = null;
+    let reward_usd: number | null = null;
+    let find_tier: string = "FIND";
+
+    try {
+      price_usd = await getLatestAddrPriceUsd(chain_id, token_address);
+      if (price_usd !== null) {
+        reward_usd = reward_amount * price_usd;
+        find_tier = findTierByUsd(reward_usd);
+      }
+    } catch {
+      // Best effort only
+    }
+
+    // Golden overlay: this route is standard digs, not the golden system
+    const is_golden = false;
+
+    // 7) Insert claim after reserve
     const { error: cerr } = await sb.from("dd_treasure_claims").insert({
       user_id: user.id,
       username: user.username,
@@ -133,6 +178,8 @@ export async function POST(req: NextRequest) {
       token_symbol,
       amount: reward_amount,
       status: "CLAIMED",
+      find_tier,
+      is_golden,
     });
 
     if (cerr) {
@@ -143,7 +190,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 7) Return canonical result + any balance fields rpc returned
+    // 8) Return canonical result + tier info (useful for UI/debug)
     return NextResponse.json({
       ok: true,
       dig_id,
@@ -154,6 +201,10 @@ export async function POST(req: NextRequest) {
       token_address,
       token_symbol,
       reward_amount,
+      price_usd,
+      reward_usd,
+      find_tier,
+      is_golden,
       reserve: out,
     });
   } catch (e: any) {
