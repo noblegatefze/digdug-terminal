@@ -1525,7 +1525,14 @@ export default function Page() {
     if (!id) return null;
     return campaignsRef.current.find((c) => c.id === id) ?? null;
   };
-  const availableBalance = (c: Campaign) => Math.max(0, c.onChainBalance);
+  const availableBalance = (c: Campaign) =>
+    Math.max(
+      0,
+      Number(c.onChainBalance ?? 0) ||
+      (Number(c.depositedTotal ?? 0) -
+        Number(c.withdrawnTotal ?? 0) -
+        Number(c.claimedUnwithdrawn ?? 0))
+    );
 
   /** --- Claim ledger helpers --- **/
   const recomputeTreasureBalancesForUser = (username: string | null, allClaims: TreasureClaim[]) => {
