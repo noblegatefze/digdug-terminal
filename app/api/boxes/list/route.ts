@@ -15,7 +15,6 @@ function asNum(v: any): number {
 }
 
 export async function GET() {
-  // 1) Load only ACTIVE + CONFIGURED boxes (what Terminal should show)
   const { data, error } = await supabase
     .from("dd_boxes")
     .select(`
@@ -49,57 +48,25 @@ export async function GET() {
   }
 
   const boxes = data ?? [];
-  const ids = boxes.map((x: any) => x.id);
+  const ids = boxes.map((b: any) => String(b.id));
 
-  // 2) Compute balances from canonical ledger
-  // Balance rule:
-  //  + credit/deposit/fund/topup
-  //  - claim/claim_paid/withdraw/debit/reserve
-  let bal: Record<string, number> = {};
-  let metaAgg: Record<string, { deposited: number; withdrawn: number; claimed_unwithdrawn: number }> = {};
-
+  // ✅ Canonical balances from DB aggregation
+  const balMap: Record<string, any> = {};
   if (ids.length) {
-    const { data: rows, error: lerr } = await supabase
-      .from("dd_box_ledger")
-      .select("box_id, entry_type, amount")
-      .in("box_id", ids);
-
-    if (lerr) {
-      return NextResponse.json({ ok: false, error: lerr.message }, { status: 500 });
+    const { data: bals, error: berr } = await supabase.rpc("rpc_box_balances_from_ledger", { p_box_ids: ids });
+    if (berr) {
+      return NextResponse.json({ ok: false, error: berr.message }, { status: 500 });
     }
-
-    for (const r of rows ?? []) {
-      const boxId = String((r as any).box_id);
-      const entry = String((r as any).entry_type ?? "").toLowerCase();
-      const amt = asNum((r as any).amount);
-
-      if (!bal[boxId]) bal[boxId] = 0;
-      if (!metaAgg[boxId]) metaAgg[boxId] = { deposited: 0, withdrawn: 0, claimed_unwithdrawn: 0 };
-
-      // Credits
-      if (entry === "credit" || entry === "deposit" || entry === "fund" || entry === "topup") {
-        bal[boxId] += amt;
-        metaAgg[boxId].deposited += amt; // display-only
-        continue;
-      }
-
-      // Debits (box outflow / reserve)
-      if (entry === "withdraw" || entry === "claim_paid" || entry === "debit" || entry === "reserve" || entry === "claim") {
-        bal[boxId] -= amt;
-
-        if (entry === "withdraw" || entry === "claim_paid") metaAgg[boxId].withdrawn += amt; // display-only
-        if (entry === "claim" || entry === "reserve" || entry === "debit") metaAgg[boxId].claimed_unwithdrawn += amt; // display-only
-
-        continue;
-      }
-
-      // Unknown entry types are ignored safely
-    }
+    for (const r of bals ?? []) balMap[String((r as any).box_id)] = r;
   }
 
   const campaigns = boxes.map((b: any) => {
-    const onChainBalance = asNum(bal[b.id] ?? 0);
-    const agg = metaAgg[b.id] ?? { deposited: 0, withdrawn: 0, claimed_unwithdrawn: 0 };
+    const a = balMap[b.id] ?? {
+      deposited_total: 0,
+      withdrawn_total: 0,
+      claimed_unwithdrawn: 0,
+      onchain_balance: 0,
+    };
 
     return {
       id: b.id,
@@ -113,13 +80,10 @@ export async function GET() {
       tokenDecimals: b.token_decimals ?? undefined,
       tokenChainId: b.token_chain_id ?? undefined,
 
-      // Canonical available for Terminal listing
-      onChainBalance,
-
-      // Display-only (kept for backward compat with UI expectations)
-      claimedUnwithdrawn: asNum(agg.claimed_unwithdrawn),
-      depositedTotal: asNum(agg.deposited),
-      withdrawnTotal: asNum(agg.withdrawn),
+      onChainBalance: asNum(a.onchain_balance),
+      claimedUnwithdrawn: asNum(a.claimed_unwithdrawn),
+      depositedTotal: asNum(a.deposited_total),
+      withdrawnTotal: asNum(a.withdrawn_total),
 
       meta: b.meta ?? {},
 
