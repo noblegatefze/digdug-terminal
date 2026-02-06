@@ -44,6 +44,38 @@ async function claimAlreadyExists(box_id: string, dig_id: string): Promise<boole
   return (count ?? 0) > 0;
 }
 
+/**
+ * Tier by USD (canonical for DB)
+ * Bands (from your UI): <1, <4, <10, <25, else mega
+ */
+function findTierByUsd(realUsd: number) {
+  if (!Number.isFinite(realUsd) || realUsd < 0) return "FIND";
+  if (realUsd < 1) return "BASE FIND";
+  if (realUsd < 4) return "LOW FIND";
+  if (realUsd < 10) return "MEDIUM FIND";
+  if (realUsd < 25) return "HIGH FIND";
+  return "MEGA FIND";
+}
+
+/**
+ * Get latest address-based USD price for (chain_id, token_address).
+ * Returns null if not found. Best-effort only.
+ */
+async function getLatestAddrPriceUsd(chain_id: string, token_address: string): Promise<number | null> {
+  const { data, error } = await supabase
+    .from("dd_token_price_snapshots_addr")
+    .select("price_usd, as_of")
+    .eq("chain_id", chain_id)
+    .eq("token_address", token_address)
+    .order("as_of", { ascending: false })
+    .limit(1);
+
+  if (error) return null;
+  const row = data?.[0];
+  const price = row ? Number(row.price_usd) : NaN;
+  return Number.isFinite(price) ? price : null;
+}
+
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
 
@@ -78,9 +110,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Box not found" }, { status: 404 });
   }
 
-  const chain_id = String(box.deploy_chain_id ?? "").trim();
+  const chain_id = String(box.deploy_chain_id ?? "").trim().toUpperCase();
   const token_address = String(box.token_address ?? "").trim();
-  const token_symbol = String(box.token_symbol ?? "").trim();
+  const token_symbol = String(box.token_symbol ?? "").trim().toUpperCase();
 
   if (!chain_id || !token_address || !token_symbol) {
     return NextResponse.json({ ok: false, error: "Box not configured" }, { status: 400 });
@@ -115,7 +147,23 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 4) insert claim (server-resolved chain/token fields) with dig_id
+  // 4) Compute USD + tier (best-effort; never blocks claim)
+  let price_usd: number | null = null;
+  let reward_usd: number | null = null;
+  let find_tier: string = "FIND";
+  const is_golden = false; // golden overlay will be set by golden flow
+
+  try {
+    price_usd = await getLatestAddrPriceUsd(chain_id, token_address);
+    if (price_usd !== null) {
+      reward_usd = amount * price_usd;
+      find_tier = findTierByUsd(reward_usd);
+    }
+  } catch {
+    // best-effort only
+  }
+
+  // 5) insert claim (server-resolved chain/token fields) with dig_id
   // DB has UNIQUE index on (box_id, dig_id) where dig_id is not null
   const { error } = await supabase.from("dd_treasure_claims").insert({
     user_id: user.id,
@@ -127,6 +175,8 @@ export async function POST(req: NextRequest) {
     token_symbol,
     amount,
     status: "CLAIMED",
+    find_tier,
+    is_golden,
   });
 
   if (error) {
@@ -137,5 +187,5 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, find_tier, is_golden, price_usd, reward_usd });
 }
