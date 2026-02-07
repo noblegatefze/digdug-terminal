@@ -2159,7 +2159,8 @@ export default function Page() {
   };
 
   const listTreasures = () => {
-    const active = campaignsRef.current.filter((c) => c.status === "ACTIVE" && c.stage === "CONFIGURED" && availableBalance(c) > 0);
+    const active = campaignsRef.current.filter((c) => c.status === "ACTIVE" && c.stage === "CONFIGURED");
+
     if (active.length === 0) {
       emit("warn", "No active treasures available.");
       return;
@@ -2167,7 +2168,7 @@ export default function Page() {
     emit("info", "Treasures:");
     active.forEach((c, idx) => {
       const gateStr = (() => {
-        if (!authedUser) return "READY";
+        if (!authedUser) return availableBalance(c) > 0 ? "READY" : "EMPTY";
         const gate = checkDigGate(authedUser, c);
         if (gate.ok) return "READY";
         if (gate.reason === "COOLDOWN") return `COOLDOWN ${fmtMs(gate.remainingMs ?? 0)}`;
