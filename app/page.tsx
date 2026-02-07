@@ -180,6 +180,11 @@ type Campaign = {
   randomMin: number;
   randomMax: number;
 
+  available?: number;
+  statusComputed?: "READY" | "EMPTY";
+  poolMode?: "MOCK" | "LEDGER";
+  warnings?: string[];
+
   // NEW: per-user dig limit for this box
   // null => unlimited, 1 => one-time box, N => max N digs/user
   maxDigsPerUser: number | null;
@@ -1525,14 +1530,19 @@ export default function Page() {
     if (!id) return null;
     return campaignsRef.current.find((c) => c.id === id) ?? null;
   };
-  const availableBalance = (c: Campaign) =>
-    Math.max(
-      0,
-      Number(c.onChainBalance ?? 0) ||
-      (Number(c.depositedTotal ?? 0) -
-        Number(c.withdrawnTotal ?? 0) -
-        Number(c.claimedUnwithdrawn ?? 0))
-    );
+
+  const availableBalance = (c: Campaign) => {
+    // Prefer backend canonical availability if present
+    const a = Number((c as any).available);
+    if (Number.isFinite(a)) return Math.max(0, a);
+
+    // Fallback (legacy): never allow negative to dominate
+    const dep = Number((c as any).depositedTotal ?? 0);
+    const wdr = Number((c as any).withdrawnTotal ?? 0);
+    const clm = Number((c as any).claimedUnwithdrawn ?? 0);
+    const legacy = dep - wdr - clm;
+    return Math.max(0, legacy);
+  };
 
   /** --- Claim ledger helpers --- **/
   const recomputeTreasureBalancesForUser = (username: string | null, allClaims: TreasureClaim[]) => {

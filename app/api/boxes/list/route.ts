@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 function env(name: string) {
   const v = process.env[name];
   if (!v) throw new Error(`Missing env: ${name}`);
@@ -12,6 +16,16 @@ const supabase = createClient(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KE
 function asNum(v: any): number {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
+}
+
+function poolModeFromMeta(meta: any): "MOCK" | "LEDGER" {
+  const m = meta ?? {};
+  const v = String(m.pool_mode ?? "").toUpperCase();
+  return v === "LEDGER" ? "LEDGER" : "MOCK"; // default MOCK
+}
+
+function clamp0(n: number) {
+  return n < 0 ? 0 : n;
 }
 
 export async function GET() {
@@ -52,30 +66,43 @@ export async function GET() {
   const boxes = data ?? [];
   const ids = boxes.map((b: any) => String(b.id));
 
-  /**
-   * IMPORTANT:
-   * Listing boxes must NEVER depend on balances.
-   * Balances are optional in Phase Zero and may be unavailable or partially unavailable.
-   * If the RPC fails, we still return all campaigns with balances=null/0 + a warning.
-   */
+  // Optional ledger balances (do NOT block listing)
   const balMap: Record<string, any> = {};
   let balancesWarning: string | null = null;
 
   if (ids.length) {
     const { data: bals, error: berr } = await supabase.rpc("rpc_box_balances_from_ledger", { p_box_ids: ids });
-
     if (berr) {
-      // Do NOT fail the endpoint — just mark warning.
       balancesWarning = `balances_unavailable:${berr.message}`;
     } else {
-      for (const r of (bals ?? []) as any[]) {
-        balMap[String(r.box_id)] = r;
-      }
+      for (const r of (bals ?? []) as any[]) balMap[String(r.box_id)] = r;
     }
   }
 
   const campaigns = boxes.map((b: any) => {
-    const a = balMap[b.id]; // may be undefined if RPC failed or didn’t return this box
+    const meta = b.meta ?? {};
+    const poolMode = poolModeFromMeta(meta);
+
+    // Pull ledger-shaped totals if present
+    const a = balMap[b.id];
+
+    const depositedTotal = a ? asNum(a.deposited_total) : 0;
+    const withdrawnTotal = a ? asNum(a.withdrawn_total) : 0;
+    const claimedUnwithdrawn = a ? asNum(a.claimed_unwithdrawn) : 0;
+    const onChainBalance = a ? asNum(a.onchain_balance) : 0;
+
+    // Canonical availability shape (never negative)
+    // In MOCK mode, this will behave the same way once you start writing mock credits.
+    const available = clamp0(depositedTotal - claimedUnwithdrawn - withdrawnTotal);
+
+    // Computed status for UI. Never let the terminal infer this from missing fields.
+    const statusComputed = available > 0 ? "READY" : "EMPTY";
+
+    // Warnings (debug-friendly, no storms)
+    const warnings: string[] = [];
+    if (!a) warnings.push("NO_LEDGER_TOTALS");
+    if (depositedTotal === 0) warnings.push("NO_CREDITS");
+    if (available === 0) warnings.push("EMPTY");
 
     return {
       id: b.id,
@@ -89,13 +116,19 @@ export async function GET() {
       tokenDecimals: b.token_decimals ?? undefined,
       tokenChainId: b.token_chain_id ?? undefined,
 
-      // balances are OPTIONAL; if missing, keep as null (truthful) not fabricated.
-      onChainBalance: a ? asNum(a.onchain_balance) : null,
-      claimedUnwithdrawn: a ? asNum(a.claimed_unwithdrawn) : null,
-      depositedTotal: a ? asNum(a.deposited_total) : null,
-      withdrawnTotal: a ? asNum(a.withdrawn_total) : null,
+      // ledger-shaped totals (always present, numeric)
+      depositedTotal,
+      withdrawnTotal,
+      claimedUnwithdrawn,
+      onChainBalance,
 
-      meta: b.meta ?? {},
+      // computed
+      available,
+      statusComputed,
+      poolMode,
+      warnings,
+
+      meta,
 
       costUSDDD: asNum(b.cost_usddd),
       cooldownHours: asNum(b.cooldown_hours),
