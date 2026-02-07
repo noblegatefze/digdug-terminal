@@ -3748,10 +3748,25 @@ export default function Page() {
     }
 
     if (prompt.mode === "DIG_SELECT") {
-      const active = campaignsRef.current.filter((c) => c.status === "ACTIVE" && c.stage === "CONFIGURED" && availableBalance(c) > 0);
+      const active = campaignsRef.current.filter(
+        (c) => c.status === "ACTIVE" && c.stage === "CONFIGURED"
+      );
+
       const n = Number(trimmed);
-      if (!Number.isFinite(n) || n < 1 || n > active.length) return void emit("warn", "Invalid selection.");
-      digConfirmForCampaign(active[n - 1]);
+      if (!Number.isFinite(n) || n < 1 || n > active.length) {
+        emit("warn", "Invalid selection.");
+        return;
+      }
+
+      const c = active[n - 1];
+
+      // EMPTY guard (do not allow dig on empty box)
+      if (availableBalance(c) <= 0) {
+        emit("warn", "Treasure Box depleted (available = 0). Pick another.");
+        return;
+      }
+
+      digConfirmForCampaign(c);
       return;
     }
 
