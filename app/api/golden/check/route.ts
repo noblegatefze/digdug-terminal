@@ -170,6 +170,11 @@ async function handle(req: Request): Promise<NextResponse> {
   // Optional identity fields if caller provides them (does not break if missing)
   const install_id = String(body.install_id ?? "").trim();
 
+  // ✅ NEW: accept dig_id so we can canonically join Golden ↔ Rewards by dig_id
+  // Optional; doesn't break callers who don't send it.
+  let dig_id: string | null = String(body.dig_id ?? body.digId ?? "").trim();
+  if (!dig_id) dig_id = null;
+
   // Fast reject: out of reward range
   if (!Number.isFinite(usdValue) || usdValue < GOLD_MIN || usdValue > GOLD_MAX) {
     const out = { ok: true, golden: false, reason: "out_of_range" };
@@ -302,6 +307,7 @@ async function handle(req: Request): Promise<NextResponse> {
         token,
         chain,
         usd_value: usdValue,
+        dig_id, // ✅ NEW
         broadcasted_at: null,
       })
       .select("id")
@@ -364,6 +370,7 @@ async function handle(req: Request): Promise<NextResponse> {
     claim_code,
     terminal_user_id,
     tg_user_id,
+    dig_id, // ✅ NEW (debug + traceability)
     golden_slot: Number(slot?.new_count ?? 0),
     golden_cap: DAILY_CAP,
     utc_reset_in: timeLeftHMS,
@@ -389,10 +396,7 @@ export async function POST(req: Request) {
     _inFlight = handle(req)
       .catch((e: any) => {
         console.error("[golden] unexpected:", e);
-        return NextResponse.json(
-          { ok: false, error: "unexpected", detail: String(e?.message ?? e) },
-          { status: 500 }
-        );
+        return NextResponse.json({ ok: false, error: "unexpected", detail: String(e?.message ?? e) }, { status: 500 });
       })
       .finally(() => {
         _inFlight = null;
@@ -401,9 +405,6 @@ export async function POST(req: Request) {
     return _inFlight;
   } catch (e: any) {
     console.error("[golden] unexpected outer:", e);
-    return NextResponse.json(
-      { ok: false, error: "unexpected", detail: String(e?.message ?? e) },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: "unexpected", detail: String(e?.message ?? e) }, { status: 500 });
   }
 }

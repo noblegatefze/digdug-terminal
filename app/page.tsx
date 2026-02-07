@@ -2504,6 +2504,10 @@ export default function Page() {
           token: sym,
           chain: campaign.deployChainId,
           username: authedUser,
+
+          // ✅ NEW: send dig_id so Golden can be joined to Rewards Ledger
+          // Replace `digId` with your actual dig id variable in this scope.
+          dig_id: digId,
         }),
       })
         .then((r) => r.json().catch(() => null))
@@ -2514,6 +2518,7 @@ export default function Page() {
           }
         })
         .catch(() => { });
+
     }
 
   };
