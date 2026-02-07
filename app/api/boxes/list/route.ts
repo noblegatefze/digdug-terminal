@@ -17,7 +17,8 @@ function asNum(v: any): number {
 export async function GET() {
   const { data, error } = await supabase
     .from("dd_boxes")
-    .select(`
+    .select(
+      `
       id,
       owner_username,
       deploy_chain_id,
@@ -38,7 +39,8 @@ export async function GET() {
       stage,
       status,
       created_at
-    `)
+    `
+    )
     .eq("status", "ACTIVE")
     .eq("stage", "CONFIGURED")
     .order("created_at", { ascending: false });
@@ -50,23 +52,30 @@ export async function GET() {
   const boxes = data ?? [];
   const ids = boxes.map((b: any) => String(b.id));
 
-  // ✅ Canonical balances from DB aggregation
+  /**
+   * IMPORTANT:
+   * Listing boxes must NEVER depend on balances.
+   * Balances are optional in Phase Zero and may be unavailable or partially unavailable.
+   * If the RPC fails, we still return all campaigns with balances=null/0 + a warning.
+   */
   const balMap: Record<string, any> = {};
+  let balancesWarning: string | null = null;
+
   if (ids.length) {
     const { data: bals, error: berr } = await supabase.rpc("rpc_box_balances_from_ledger", { p_box_ids: ids });
+
     if (berr) {
-      return NextResponse.json({ ok: false, error: berr.message }, { status: 500 });
+      // Do NOT fail the endpoint — just mark warning.
+      balancesWarning = `balances_unavailable:${berr.message}`;
+    } else {
+      for (const r of (bals ?? []) as any[]) {
+        balMap[String(r.box_id)] = r;
+      }
     }
-    for (const r of bals ?? []) balMap[String((r as any).box_id)] = r;
   }
 
   const campaigns = boxes.map((b: any) => {
-    const a = balMap[b.id] ?? {
-      deposited_total: 0,
-      withdrawn_total: 0,
-      claimed_unwithdrawn: 0,
-      onchain_balance: 0,
-    };
+    const a = balMap[b.id]; // may be undefined if RPC failed or didn’t return this box
 
     return {
       id: b.id,
@@ -80,10 +89,11 @@ export async function GET() {
       tokenDecimals: b.token_decimals ?? undefined,
       tokenChainId: b.token_chain_id ?? undefined,
 
-      onChainBalance: asNum(a.onchain_balance),
-      claimedUnwithdrawn: asNum(a.claimed_unwithdrawn),
-      depositedTotal: asNum(a.deposited_total),
-      withdrawnTotal: asNum(a.withdrawn_total),
+      // balances are OPTIONAL; if missing, keep as null (truthful) not fabricated.
+      onChainBalance: a ? asNum(a.onchain_balance) : null,
+      claimedUnwithdrawn: a ? asNum(a.claimed_unwithdrawn) : null,
+      depositedTotal: a ? asNum(a.deposited_total) : null,
+      withdrawnTotal: a ? asNum(a.withdrawn_total) : null,
 
       meta: b.meta ?? {},
 
@@ -104,5 +114,13 @@ export async function GET() {
     };
   });
 
-  return NextResponse.json({ ok: true, campaigns });
+  return NextResponse.json({
+    ok: true,
+    campaigns,
+    warning: balancesWarning,
+    counts: {
+      active_configured: campaigns.length,
+      balances_returned: Object.keys(balMap).length,
+    },
+  });
 }
