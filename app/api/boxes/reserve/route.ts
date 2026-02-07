@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 function env(name: string) {
   const v = process.env[name];
   if (!v) throw new Error(`Missing env: ${name}`);
@@ -65,6 +69,36 @@ async function fetchCmcUsdPrice(cmcId: number): Promise<number | null> {
   }
 }
 
+type BoxBalanceRow = {
+  box_id: string;
+  deposited_total: string | number | null;
+  withdrawn_total: string | number | null;
+  claimed_unwithdrawn: string | number | null;
+  onchain_balance: string | number | null;
+};
+
+function num(x: any): number {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : 0;
+}
+
+async function getCanonicalBoxAvailableFromLedger(boxId: string): Promise<number | null> {
+  // Use the SAME RPC source as /api/boxes/list
+  const { data, error } = await supabase.rpc("rpc_box_balances_from_ledger", {
+    p_box_ids: [boxId],
+  });
+
+  if (error) return null;
+
+  const rows: BoxBalanceRow[] = Array.isArray(data) ? (data as any) : [];
+  const row = rows.find((r) => String((r as any).box_id) === boxId) ?? rows[0];
+
+  if (!row) return 0;
+
+  const avail = num((row as any).onchain_balance);
+  return Math.max(0, avail);
+}
+
 export async function POST(req: NextRequest) {
   // EMERGENCY PAUSE
   if (process.env.DIGDUG_PAUSE === "1") {
@@ -88,7 +122,6 @@ export async function POST(req: NextRequest) {
   }
 
   // ✅ Idempotency guard: if reserve already exists for (box_id, dig_id, username), return ok.
-  // NOTE: rpc_dig_reserve should already be idempotent, but this makes the API stable.
   const { count: rcount, error: rerr } = await supabase
     .from("dd_box_ledger")
     .select("id", { head: true, count: "estimated" })
@@ -102,6 +135,18 @@ export async function POST(req: NextRequest) {
   }
   if ((rcount ?? 0) > 0) {
     return NextResponse.json({ ok: true, deduped: true, note: "reserve_already_exists" });
+  }
+
+  // 🔒 Canonical availability pre-check (same source as list)
+  const available = await getCanonicalBoxAvailableFromLedger(box_id);
+  if (available == null) {
+    return NextResponse.json({ ok: false, error: "box_balance_lookup_failed" }, { status: 500 });
+  }
+  if (available < amount) {
+    return NextResponse.json(
+      { ok: false, error: "insufficient_box_balance", available, requested: amount },
+      { status: 400 }
+    );
   }
 
   // Resolve cmc_id from box meta
@@ -121,8 +166,6 @@ export async function POST(req: NextRequest) {
   const price_at = new Date().toISOString();
 
   // Atomic reserve + debit inside DB transaction
-  // NOTE: DB now has a UNIQUE index on (box_id, meta->>'dig_id') for claim_reserve,
-  // so repeated calls become safe (the RPC should handle conflict / idempotency).
   const { data, error } = await supabase.rpc("rpc_dig_reserve", {
     p_username: username,
     p_box_id: box_id,
@@ -134,8 +177,6 @@ export async function POST(req: NextRequest) {
   });
 
   if (error) {
-    // If the RPC attempts to insert duplicate reserve rows, the DB unique index will block it.
-    // We return a stable error message to the client.
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
 

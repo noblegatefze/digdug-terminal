@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 function env(name: string) {
   const v = process.env[name];
   if (!v) throw new Error(`Missing env: ${name}`);
@@ -17,6 +21,8 @@ function uid(prefix = "dig") {
 function rand01() {
   return Math.random();
 }
+
+const MIN_YIELD_FLOOR = 0.000001;
 
 function computeRewardFromBox(box: any): number {
   const mode = String(box?.reward_mode ?? "RANDOM").toUpperCase();
@@ -55,7 +61,6 @@ function findTierByUsd(realUsd: number) {
  * Returns null if not found.
  */
 async function getLatestAddrPriceUsd(chain_id: string, token_address: string): Promise<number | null> {
-  // Try exact match first
   const { data, error } = await sb
     .from("dd_token_price_snapshots_addr")
     .select("price_usd, as_of")
@@ -67,7 +72,27 @@ async function getLatestAddrPriceUsd(chain_id: string, token_address: string): P
   if (error) return null;
   const row = data?.[0];
   const price = row ? Number(row.price_usd) : NaN;
-  return Number.isFinite(price) ? price : null;
+  return Number.isFinite(price) && price > 0 ? price : null;
+}
+
+function num(x: any): number {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : 0;
+}
+
+async function getBoxAvailableFromLedger(box_id: string): Promise<number | null> {
+  // Canonical source used by /api/boxes/list
+  const { data, error } = await sb.rpc("rpc_box_balances_from_ledger", {
+    p_box_ids: [box_id],
+  });
+
+  if (error) return null;
+  const rows = Array.isArray(data) ? (data as any[]) : [];
+  const row = rows.find((r) => String(r?.box_id ?? "") === box_id) ?? rows[0];
+  if (!row) return 0;
+
+  const avail = Math.max(0, num(row?.onchain_balance));
+  return avail;
 }
 
 export async function POST(req: NextRequest) {
@@ -117,8 +142,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "invalid_cost" }, { status: 500 });
     }
 
-    // 3) Compute reward server-side
-    const reward_amount = computeRewardFromBox(box);
     const chain_id = String(box.deploy_chain_id ?? "").trim().toUpperCase();
     const token_address = String(box.token_address ?? "").trim();
     const token_symbol = String(box.token_symbol ?? "").trim().toUpperCase();
@@ -127,10 +150,34 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "box_not_configured" }, { status: 400 });
     }
 
-    // 4) Create dig_id server-side
+    // 3) Canonical inventory check (same truth as /api/boxes/list)
+    const available = await getBoxAvailableFromLedger(box_id);
+    if (available == null) {
+      return NextResponse.json({ ok: false, error: "box_balance_lookup_failed" }, { status: 500 });
+    }
+    if (available < MIN_YIELD_FLOOR) {
+      return NextResponse.json(
+        { ok: false, error: "insufficient_box_balance", available, requested: MIN_YIELD_FLOOR },
+        { status: 400 }
+      );
+    }
+
+    // 4) Compute reward server-side and CLAMP to available
+    const rawReward = computeRewardFromBox(box);
+    const safeReward = Math.max(MIN_YIELD_FLOOR, Number.isFinite(rawReward) ? rawReward : 0);
+    const reward_amount = Math.min(available, safeReward);
+
+    if (!Number.isFinite(reward_amount) || reward_amount < MIN_YIELD_FLOOR) {
+      return NextResponse.json(
+        { ok: false, error: "insufficient_box_balance", available, requested: safeReward },
+        { status: 400 }
+      );
+    }
+
+    // 5) Create dig_id server-side
     const dig_id = uid("dig");
 
-    // 5) Reserve (canonical debit + reserve) FIRST
+    // 6) Reserve (canonical debit + reserve) FIRST
     const { data: rdata, error: rerr } = await sb.rpc("rpc_dig_reserve", {
       p_username: username,
       p_box_id: box_id,
@@ -146,10 +193,11 @@ export async function POST(req: NextRequest) {
     }
     const out: any = rdata;
     if (!out?.ok) {
+      // If the RPC returned a structured error (like insufficient_box_balance), preserve it.
       return NextResponse.json(out ?? { ok: false, error: "reserve_failed" }, { status: 400 });
     }
 
-    // 6) Compute USD + tier (best-effort; never blocks claim)
+    // 7) Compute USD + tier (best-effort; never blocks claim)
     let price_usd: number | null = null;
     let reward_usd: number | null = null;
     let find_tier: string = "FIND";
@@ -164,10 +212,9 @@ export async function POST(req: NextRequest) {
       // Best effort only
     }
 
-    // Golden overlay: this route is standard digs, not the golden system
     const is_golden = false;
 
-    // 7) Insert claim after reserve
+    // 8) Insert claim after reserve
     const { error: cerr } = await sb.from("dd_treasure_claims").insert({
       user_id: user.id,
       username: user.username,
@@ -184,13 +231,12 @@ export async function POST(req: NextRequest) {
 
     if (cerr) {
       const code = (cerr as any)?.code;
-      // If duplicate (shouldn't happen with server dig_id), treat as ok
       if (code !== "23505") {
         return NextResponse.json({ ok: false, error: "claim_insert_failed", detail: cerr.message }, { status: 500 });
       }
     }
 
-    // 8) Return canonical result + tier info (useful for UI/debug)
+    // 9) Return canonical result + tier info
     return NextResponse.json({
       ok: true,
       dig_id,

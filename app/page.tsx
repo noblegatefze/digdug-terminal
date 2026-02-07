@@ -969,6 +969,22 @@ export default function Page() {
     setLines((prev) => [...prev, { id: uid("l"), t: nowTs(), console: c, kind, text }]);
   };
 
+  const refreshCampaignsFromServer = async () => {
+    try {
+      const r = await fetch("/api/boxes/list", { method: "GET", cache: "no-store" as any });
+      if (!r.ok) return false;
+
+      const j = (await r.json().catch(() => null)) as any;
+      const dbCampaigns = Array.isArray(j?.campaigns) ? (j.campaigns as Campaign[]) : [];
+      if (dbCampaigns.length > 0) {
+        setCampaigns(dbCampaigns);
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  };
 
   const sendStat = async (event: string, payload?: Record<string, any>) => {
     // best-effort; caller may await for DB consistency
@@ -2367,7 +2383,15 @@ export default function Page() {
       const out = (await r.json().catch(() => null)) as any;
 
       if (!r.ok || !out?.ok) {
-        emit("warn", `Dig failed (${out?.error ?? `HTTP ${r.status}`}). No fuel spent.`);
+        const err = String(out?.error ?? `HTTP ${r.status}`);
+        emit("warn", `Dig failed (${err}). No fuel spent.`);
+
+        // If server says the box is empty/insufficient, refresh campaigns so UI eligibility matches server truth.
+        if (err === "insufficient_box_balance") {
+          emit("sys", "Syncing box balances...");
+          await refreshCampaignsFromServer();
+        }
+
         return;
       }
 
