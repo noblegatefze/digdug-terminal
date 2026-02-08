@@ -1,4 +1,4 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
@@ -16,20 +16,19 @@ export async function GET() {
     auth: { persistSession: false },
   });
 
-  const { data, error } = await supabase.rpc("rpc_admin_flags");
-
+  const { data, error } = await supabase.rpc("rpc_protocol_state");
   if (error) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
 
   const row = Array.isArray(data) ? data[0] : data;
 
-  // ✅ Cache for 30s at the edge/CDN; serve stale for 2m while revalidating
-  return new NextResponse(JSON.stringify({ ok: true, flags: row }), {
+  // cache: brief (mode changes are rare)
+  return new NextResponse(JSON.stringify({ ok: true, protocol: row }), {
     status: 200,
     headers: {
       "content-type": "application/json",
-      "cache-control": "public, max-age=0, s-maxage=30, stale-while-revalidate=120",
+      "cache-control": "public, max-age=0, s-maxage=10, stale-while-revalidate=60",
     },
   });
 }
