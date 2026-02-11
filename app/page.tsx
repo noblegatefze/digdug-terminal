@@ -29,10 +29,8 @@ type TermLine = { id: string; t: string; console?: ConsoleMode; kind: LineKind; 
 
 type PromptMode =
   | "IDLE"
-  | "HELP_SELECT"
   | "DOCS_SELECT"
   | "REG_USER"
-  | "REG_PASS"
   | "LOGIN_USER"
   | "LOGIN_PASS"
   | "NEED_2FA"
@@ -54,11 +52,9 @@ type PromptMode =
   | "WALLET_SWITCH_PICK"
   | "WALLET_FORGET_PICK"
   // sponsor prompts
-  | "SP_HARDGATE_CONFIRM"
   | "SP_CREATE_CHAIN_PICK"
   | "SP_CREATE_DECLARATION_CONFIRM"
   | "SP_CONFIG_PICK"
-  | "SP_CHAIN_PICK"
   | "SP_TOKEN_ADDRESS"
   | "SP_SET_COST"
   | "SP_SET_COOLDOWN"
@@ -195,42 +191,6 @@ type Campaign = {
   createdAt: number;
 };
 
-
-/** --- Mock token price (Phase Zero; oracle-safe) --- **/
-function mockTokenUsdPrice(c: Campaign, mode: PriceMockMode): number | null {
-  const sym = c.tokenSymbol ?? "";
-  const addr = c.tokenAddress ?? "";
-  if (!sym || !addr) return null;
-
-  const seed = `${c.id}|${c.tokenChainId ?? c.deployChainId}|${sym}|${addr}`.toLowerCase();
-
-  if (mode === "NEVER") return null;
-
-  const has = mode === "ALWAYS" ? true : seeded01(seed + "|has") < 0.65;
-  if (!has) return null;
-
-  const r = seeded01(seed + "|p");
-  let price = 0;
-
-  if (r < 0.15) {
-    // micro caps
-    price = 0.0001 + seeded01(seed + "|a") * 0.0099;
-  } else if (r < 0.5) {
-    // sub $1
-    price = 0.01 + seeded01(seed + "|b") * 0.99;
-  } else if (r < 0.85) {
-    // $1 - $20
-    price = 1 + seeded01(seed + "|c") * 19;
-  } else {
-    // $20 - $200
-    price = 20 + seeded01(seed + "|d") * 180;
-  }
-
-  // keep stable but readable
-  return Math.max(0.000001, price);
-}
-
-
 type DigRecord = {
   id: string;
   at: string;
@@ -281,6 +241,9 @@ type DigGateState = { count: number; lastAt: number | null };
 const BUILD_VERSION = DISPLAY_VERSION;
 const BUILD_HASH = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local";
 const STORAGE_KEY_BUILD = "dd_build_v1";
+
+// build freshness check (prevents old tabs running stale code)
+const BUILD_CHECK_TTL_MS = 60_000; // check at most once per minute
 
 // local storage keys
 const STORAGE_KEY_PASS = "dd_terminal_pass_v1";
@@ -782,32 +745,6 @@ function savePriceCache(cache: Record<string, PriceCacheHit>) {
   } catch { }
 }
 
-async function getCmcPriceUsdCached(boxId: string): Promise<number | null> {
-  if (!boxId) return null;
-  const key = String(boxId);
-  const now = Date.now();
-  const cache = loadPriceCache();
-  const hit = cache[key];
-
-  if (hit && (now - hit.at) < PRICE_TTL_MS) {
-    return hit.price;
-  }
-
-  const r = await fetch(`/api/pricing/cmc?box_id=${encodeURIComponent(key)}`, {
-    cache: "no-store",
-  })
-    .then(res => (res.ok ? res.json() : null))
-    .catch(() => null);
-
-  const p = typeof r?.price_usd === "number" ? r.price_usd : null;
-  const price = (p != null && p > 0) ? p : null;
-
-  cache[key] = { price, at: now };
-  savePriceCache(cache);
-
-  return price;
-}
-
 /** --- Wallet registry helpers --- **/
 type WalletRegistry = Record<string, { owner: string; createdAt: number }>;
 function loadWalletRegistry(): WalletRegistry {
@@ -909,6 +846,9 @@ export default function Page() {
 
   // sponsor boxes
   const [campaigns, setCampaigns] = useState<Campaign[]>(() => seedSponsorCampaigns());
+  const [campaignSource, setCampaignSource] = useState<"DB" | "LOCAL" | "SEED">("SEED");
+  const campaignSourceRef = useRef<"DB" | "LOCAL" | "SEED">("SEED");
+  useEffect(() => { campaignSourceRef.current = campaignSource; }, [campaignSource]);
   const [sponsorActiveBoxId, setSponsorActiveBoxId] = useState<string | null>(null);
 
   // claims + balances
@@ -935,6 +875,8 @@ export default function Page() {
   const [autoScroll, setAutoScroll] = useState(true);
 
   // refs
+  const lastBuildCheckAtRef = useRef<number>(0);
+  const refreshingRef = useRef<boolean>(false);
   const campaignsRef = useRef(campaigns);
   const usdddAllocatedRef = useRef(usdddAllocated);
   const usdddAcquiredRef = useRef(usdddAcquired);
@@ -968,6 +910,53 @@ export default function Page() {
     const c = consoleModeRef.current;
     setLines((prev) => [...prev, { id: uid("l"), t: nowTs(), console: c, kind, text }]);
   };
+
+  function hardRefresh() {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
+
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set("r", String(Date.now())); // cache-bust
+      window.location.replace(url.toString());
+    } catch {
+      window.location.reload();
+    }
+  }
+
+  async function checkBuildFreshness(): Promise<boolean> {
+    const now = Date.now();
+    if (now - lastBuildCheckAtRef.current < BUILD_CHECK_TTL_MS) return true;
+    lastBuildCheckAtRef.current = now;
+
+    try {
+      const r = await fetch("/api/build", { cache: "no-store" });
+      if (!r.ok) return true;
+
+      const j = await r.json().catch(() => null);
+
+      const latest = `${j?.build_version ?? ""}@${j?.build_hash ?? ""}`;
+      const current = `${BUILD_VERSION}@${BUILD_HASH}`;
+
+      const minBuild = String(j?.min_build ?? "").trim();
+      if (minBuild && BUILD_VERSION < minBuild) {
+        emit("warn", `Terminal requires update (min build ${minBuild}). Refreshing...`);
+        hardRefresh();
+        return false;
+      }
+
+      if (latest && latest !== current) {
+        emit("warn", `New Terminal build available: ${latest}`);
+        emit("sys", "Refreshing now to apply latest protocol rules...");
+        hardRefresh();
+        return false;
+      }
+
+      return true;
+    } catch {
+      return true;
+    }
+  }
 
   const refreshCampaignsFromServer = async () => {
     try {
@@ -1244,13 +1233,17 @@ export default function Page() {
     (async () => {
       // 1) DB-first
       try {
-        const r = await fetch("/api/boxes/list", { method: "GET" });
+        const r = await fetch("/api/boxes/list", { method: "GET", cache: "no-store" as any });
         if (r.ok) {
           const j = (await r.json()) as any;
-          const dbCampaigns = Array.isArray(j?.campaigns) ? (j.campaigns as Campaign[]) : [];
+          const dbCampaigns = Array.isArray(j?.campaigns)
+            ? (j.campaigns as Campaign[])
+            : [];
+
           if (dbCampaigns.length > 0) {
             setCampaigns(dbCampaigns);
-            return; // IMPORTANT: do not write to localStorage when DB is authoritative
+            setCampaignSource("DB");
+            return; // DB is authoritative
           }
         }
       } catch {
@@ -1261,22 +1254,25 @@ export default function Page() {
       const saved = loadCampaigns();
       if (saved && saved.length > 0) {
         setCampaigns(saved);
+        setCampaignSource("LOCAL");
         return;
       }
 
       // 3) seeded fallback
       const seeded = seedSponsorCampaigns();
       setCampaigns(seeded);
+      setCampaignSource("SEED");
       saveCampaigns(seeded);
     })();
   }, [passLoaded]);
 
-  // persist campaigns (boxes) ONLY when we are using local campaigns (Phase Zero fallback)
+  // persist campaigns (boxes) ONLY when NOT DB-authoritative
   useEffect(() => {
     if (!passLoaded) return;
 
-    // if DB is populated, /api/boxes/list would have loaded non-empty and we don't want local overwrites
-    // This keeps Phase Zero behavior unchanged while DB is empty.
+    // Never overwrite local cache when DB is authoritative
+    if (campaignSourceRef.current === "DB") return;
+
     saveCampaigns(campaignsRef.current);
   }, [passLoaded, campaigns]);
 
@@ -3038,10 +3034,13 @@ export default function Page() {
   };
 
   // COMMAND ROUTER
-  const runCommand = (raw: string) => {
+  const runCommand = async (raw: string) => {
     const v = normalizeInput(raw);
     if (!v) return;
     const low = v.toLowerCase();
+
+    const ok = await checkBuildFreshness();
+    if (!ok) return;
 
     if (paused && !["help", "status", "build", "docs"].includes(low)) {
       emit("warn", "⛔ Terminal is paused (maintenance). Read-only mode.");
@@ -3402,9 +3401,11 @@ export default function Page() {
   };
 
   // INPUT HANDLER
-  const submitInput = (raw: string) => {
+  const submitInput = async (raw: string) => {
     const value = raw; // do not trim yet (we allow empty ENTER for withdraw addr)
     const trimmed = normalizeInput(raw);
+    const ok = await checkBuildFreshness();
+    if (!ok) return;
 
     if (trimmed.toLowerCase() === "cancel") {
       emit("cmd", "> cancel");
@@ -3422,7 +3423,8 @@ export default function Page() {
 
     if (prompt.mode === "IDLE") {
       if (trimmed.length === 0) return;
-      return void runCommand(trimmed);
+      void runCommand(trimmed);
+      return;
     }
 
     emit("cmd", `> ${trimmed.length === 0 ? "" : trimmed}`);
@@ -4187,7 +4189,7 @@ export default function Page() {
     e.preventDefault();
     const v = cmd;
     setCmd("");
-    submitInput(v);
+    void submitInput(v);
   };
 
   // menu items
@@ -4325,7 +4327,7 @@ export default function Page() {
         <div className="dd-drawer-body">
           <div className="dd-menu">
             {(toolboxOpen ? menuItems.toolbox : menuItems.base[consoleMode]).map((it) => (
-              <button key={it.label} type="button" className="dd-menu-item" onClick={() => submitInput(it.cmd)}>
+              <button key={it.label} type="button" className="dd-menu-item" onClick={() => void submitInput(it.cmd)}>
                 {it.label}
               </button>
             ))}
