@@ -102,6 +102,7 @@ type PromptState = {
   captchaNeed?: number;          // N (e.g. 3)
   captchaFails?: number;         // per-run
   captchaAnswer?: string;        // expected answer (normalized)
+  captchaChallengeId?: string; // server challenge id from /api/captcha/new
   captchaPayload?: any;          // carry next action data (e.g. username or campaignId)
   captchaLockedUntil?: number;   // epoch ms
 
@@ -267,6 +268,7 @@ const STORAGE_KEY_USERS = "dd_terminal_users_v1";
 const STORAGE_KEY_ALLOC_LAST_AT = "dd_usddd_alloc_last_at_v1";
 const STORAGE_KEY_FUEL_V1 = "dd_fuel_state_v1";
 const STORAGE_KEY_CAMPAIGNS_V1 = "dd_campaigns_v1";
+const STORAGE_KEY_CAPTCHA_PASS = "dd_captcha_pass_v1";
 
 // acquired USDDD lifetime totals (per Terminal Pass, device-local)
 const STORAGE_KEY_ACQUIRED_TOTAL_V1 = "dd_usddd_acquired_total_v1";
@@ -291,7 +293,6 @@ const BASE_CAP = 20;
 
 // acquisition cap (acquired only; not daily allocation)
 const ACQUIRE_CAP = 1000;
-
 
 // sponsor bounds
 const COST_MIN = 0.01;
@@ -348,6 +349,50 @@ function ensureInstallId() {
     return `inst_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
   }
 }
+
+type CaptchaPassStore = {
+  pass_id: string;
+  purpose: "REGISTER" | "DIG";
+  expires_at: string;        // ISO
+  digs_left?: number | null; // DIG only
+};
+
+function loadCaptchaPass(): CaptchaPassStore | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_CAPTCHA_PASS);
+    if (!raw) return null;
+    const j = JSON.parse(raw) as CaptchaPassStore;
+    if (!j?.pass_id) return null;
+
+    // basic expiry check client-side (server is authoritative anyway)
+    const exp = Date.parse(j.expires_at ?? "");
+    if (!Number.isFinite(exp) || Date.now() > exp) return null;
+
+    return j;
+  } catch {
+    return null;
+  }
+}
+
+function saveCaptchaPass(p: CaptchaPassStore) {
+  try {
+    localStorage.setItem(STORAGE_KEY_CAPTCHA_PASS, JSON.stringify(p));
+  } catch { }
+}
+
+function clearCaptchaPass() {
+  try {
+    localStorage.removeItem(STORAGE_KEY_CAPTCHA_PASS);
+  } catch { }
+}
+
+function getCaptchaPassIdFor(purpose: "REGISTER" | "DIG") {
+  const p = loadCaptchaPass();
+  if (!p) return null;
+  if (p.purpose !== purpose) return null;
+  return p.pass_id;
+}
+
 function normalizeInput(v: string) {
   return v.trim();
 }
@@ -382,7 +427,6 @@ function isNo(v: string) {
 function passHashOf(pw: string) {
   let h = 5381;
   for (let i = 0; i < pw.length; i++) h = ((h << 5) + h) ^ pw.charCodeAt(i);
-
 
   return (h >>> 0).toString(16).padStart(8, "0");
 }
@@ -429,7 +473,6 @@ function fmtUsdValue(v: number) {
   if (!Number.isFinite(v)) return "N/A";
   return v.toFixed(2);
 }
-
 
 function loadUsers(): Record<string, TerminalPass> {
   try {
@@ -962,7 +1005,7 @@ export default function Page() {
     return { question, answer };
   }
 
-  function startCaptcha(purpose: "REGISTER" | "DIG", payload: any) {
+  function startCaptcha(purpose: "REGISTER" | "DIG", payload: any, force: boolean = false) {
     const lockedUntil = getCaptchaLockedUntil();
     const now = Date.now();
     if (lockedUntil && now < lockedUntil) {
@@ -972,50 +1015,150 @@ export default function Page() {
       return;
     }
 
-    // ✅ If already trusted, skip captcha for DIG
-    if (purpose === "DIG" && isCaptchaTrusted()) {
-      const t = getCaptchaTrust();
-      emit("sys", `Anti-bot: trusted ✅ (${t?.digsLeft ?? 0} digs left)`);
-      // continue immediately (no captcha)
-      void finishCaptchaAndContinue({
-        mode: "CAPTCHA_CHALLENGE",
-        captchaPurpose: "DIG",
-        captchaPayload: payload,
-      } as any);
+    // ✅ Server-side enforcement: if we already have a valid pass_id for DIG, skip captcha
+    // (This avoids annoying real users; server is still authoritative.)
+    if (!force && purpose === "DIG") {
+      const passId = getCaptchaPassIdFor("DIG");
+      if (passId) {
+        emit("sys", "Anti-bot: trusted ✅ (server pass active)");
+        void finishCaptchaAndContinue({
+          mode: "CAPTCHA_CHALLENGE",
+          captchaPurpose: "DIG",
+          captchaPayload: payload,
+        } as any);
+        return;
+      }
+    }
+
+    const usernameFor =
+      purpose === "REGISTER"
+        ? String(payload?.username ?? "").trim()
+        : String(authedUser ?? "").trim();
+
+    if (!usernameFor || usernameFor.length < 3) {
+      emit("err", "Captcha error: missing username context.");
+      setPrompt({ mode: "IDLE" });
       return;
     }
 
-    const q = makeCaptchaQuestion();
     emit("warn", "ANTI-BOT CHECK (Terminal CAPTCHA)");
     emit("sys", `You must pass ${CAPTCHA_NEED} checks. Type ${C("cancel")} to abort.`);
-    emit("info", q.question);
-    emit("sys", `Round: 1/${CAPTCHA_NEED}`);
+    emit("sys", "Requesting challenge-");
 
-    setPrompt({
-      mode: "CAPTCHA_CHALLENGE",
-      captchaPurpose: purpose,
-      captchaPayload: payload,
-      captchaRound: 1,
-      captchaNeed: CAPTCHA_NEED,
-      captchaFails: 0,
-      captchaAnswer: normCaptcha(q.answer),
-    });
+    void (async () => {
+      try {
+        const r = await fetch("/api/captcha/new", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            purpose,
+            username: usernameFor,
+            install_id: installId,
+          }),
+        });
+
+        const j = (await r.json().catch(() => null)) as any;
+
+        if (!r.ok || !j?.ok) {
+          emit("err", `Captcha unavailable (${j?.error ?? `HTTP ${r.status}`}). Try again.`);
+          setPrompt({ mode: "IDLE" });
+          return;
+        }
+
+        const question = String(j.question ?? "CAPTCHA: (invalid question)");
+        const challengeId = String(j.challenge_id ?? "");
+
+        if (!challengeId) {
+          emit("err", "Captcha unavailable (missing challenge id).");
+          setPrompt({ mode: "IDLE" });
+          return;
+        }
+
+        emit("info", question);
+        emit("sys", `Round: 1/${CAPTCHA_NEED}`);
+
+        setPrompt({
+          mode: "CAPTCHA_CHALLENGE",
+          captchaPurpose: purpose,
+          captchaPayload: payload,
+          captchaRound: 1,
+          captchaNeed: CAPTCHA_NEED,
+          captchaFails: 0,
+          captchaAnswer: "", // server-side now
+          // store server challenge id + username context
+          captchaChallengeId: challengeId,
+          authUser: usernameFor, // reuse field as context; safe here
+        } as any);
+      } catch {
+        emit("err", "Captcha unavailable (network). Try again.");
+        setPrompt({ mode: "IDLE" });
+      }
+    })();
   }
 
   function nextCaptchaRound(prev: PromptState) {
     const round = (prev.captchaRound ?? 1) + 1;
     const need = prev.captchaNeed ?? CAPTCHA_NEED;
-    const q = makeCaptchaQuestion();
 
-    emit("info", q.question);
-    emit("sys", `Round: ${round}/${need}`);
+    const purpose = (prev as any).captchaPurpose as "REGISTER" | "DIG";
+    const usernameFor =
+      purpose === "REGISTER"
+        ? String((prev as any)?.authUser ?? (prev as any)?.captchaPayload?.username ?? "").trim()
+        : String(authedUser ?? "").trim();
 
-    setPrompt({
-      ...prev,
-      mode: "CAPTCHA_CHALLENGE",
-      captchaRound: round,
-      captchaAnswer: normCaptcha(q.answer),
-    });
+    if (!usernameFor || usernameFor.length < 3) {
+      emit("err", "Captcha error: missing username context.");
+      setPrompt({ mode: "IDLE" });
+      return;
+    }
+
+    emit("sys", "Requesting next challenge-");
+
+    void (async () => {
+      try {
+        const r = await fetch("/api/captcha/new", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            purpose,
+            username: usernameFor,
+            install_id: installId,
+          }),
+        });
+
+        const j = (await r.json().catch(() => null)) as any;
+
+        if (!r.ok || !j?.ok) {
+          emit("err", `Captcha unavailable (${j?.error ?? `HTTP ${r.status}`}). Try again.`);
+          setPrompt({ mode: "IDLE" });
+          return;
+        }
+
+        const question = String(j.question ?? "CAPTCHA: (invalid question)");
+        const challengeId = String(j.challenge_id ?? "");
+
+        if (!challengeId) {
+          emit("err", "Captcha unavailable (missing challenge id).");
+          setPrompt({ mode: "IDLE" });
+          return;
+        }
+
+        emit("info", question);
+        emit("sys", `Round: ${round}/${need}`);
+
+        setPrompt({
+          ...prev,
+          mode: "CAPTCHA_CHALLENGE",
+          captchaRound: round,
+          captchaAnswer: "", // server-side now
+          captchaChallengeId: challengeId,
+          authUser: usernameFor, // keep context
+        } as any);
+      } catch {
+        emit("err", "Captcha unavailable (network). Try again.");
+        setPrompt({ mode: "IDLE" });
+      }
+    })();
   }
 
   async function finishCaptchaAndContinue(prev: PromptState) {
@@ -1037,7 +1180,12 @@ export default function Page() {
         const r = await fetch("/api/auth/register", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ username: u }),
+          body: JSON.stringify({
+            username: u,
+            install_id: installId,
+            captcha_pass_id: getCaptchaPassIdFor("REGISTER"),
+          }),
+
         });
 
         const data = (await r.json()) as any;
@@ -2636,7 +2784,10 @@ export default function Page() {
         body: JSON.stringify({
           username: authedUser,
           box_id: campaign.id,
+          install_id: installId,
+          captcha_pass_id: getCaptchaPassIdFor("DIG"),
         }),
+
       });
 
       const out = (await r.json().catch(() => null)) as any;
@@ -3694,44 +3845,91 @@ export default function Page() {
     emit("cmd", `> ${trimmed.length === 0 ? "" : trimmed}`);
 
     // -----------------------------
-    // CAPTCHA prompt handler
+    // CAPTCHA prompt handler (SERVER)
     // -----------------------------
     if (prompt.mode === "CAPTCHA_CHALLENGE") {
       const need = prompt.captchaNeed ?? CAPTCHA_NEED;
       const round = prompt.captchaRound ?? 1;
       const fails = prompt.captchaFails ?? 0;
 
-      const expected = normCaptcha(prompt.captchaAnswer ?? "");
-      const got = normCaptcha(trimmed);
+      const purpose = (prompt as any).captchaPurpose as "REGISTER" | "DIG";
+      const challengeId = String((prompt as any).captchaChallengeId ?? "").trim();
 
-      if (!expected) {
-        emit("err", "Captcha internal error. Try again.");
+      const usernameFor =
+        purpose === "REGISTER"
+          ? String((prompt as any).authUser ?? (prompt as any)?.captchaPayload?.username ?? "").trim()
+          : String(authedUser ?? "").trim();
+
+      if (!purpose || (purpose !== "REGISTER" && purpose !== "DIG")) {
+        emit("err", "Captcha internal error (bad purpose).");
         setPrompt({ mode: "IDLE" });
         return;
       }
 
-      if (got !== expected) {
-        const nextFails = fails + 1;
-        emit("warn", `Incorrect. (${nextFails}/${CAPTCHA_MAX_FAILS})`);
-
-        if (nextFails >= CAPTCHA_MAX_FAILS) {
-          const lockUntil = Date.now() + CAPTCHA_LOCK_MS;
-          setCaptchaLockedUntil(lockUntil);
-          emit("err", `CAPTCHA LOCKED for ${fmtMs(CAPTCHA_LOCK_MS)} due to repeated failures.`);
-          setPrompt({ mode: "CAPTCHA_LOCKED", captchaLockedUntil: lockUntil });
-          return;
-        }
-
-        // fresh question after each fail (prevents brute forcing)
-        const q2 = makeCaptchaQuestion();
-        emit("info", q2.question);
-
-        setPrompt({
-          ...prompt,
-          captchaFails: nextFails,
-          captchaAnswer: normCaptcha(q2.answer),
-        });
+      if (!challengeId) {
+        emit("err", "Captcha internal error (missing challenge id). Restart captcha.");
+        setPrompt({ mode: "IDLE" });
         return;
+      }
+
+      if (!usernameFor || usernameFor.length < 3) {
+        emit("err", "Captcha internal error (missing username).");
+        setPrompt({ mode: "IDLE" });
+        return;
+      }
+
+      // Verify answer with server
+      let vj: any = null;
+      try {
+        const vr = await fetch("/api/captcha/verify", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            challenge_id: challengeId,
+            answer: trimmed,
+            purpose,
+            username: usernameFor,
+            install_id: installId,
+          }),
+        });
+
+        vj = await vr.json().catch(() => null);
+
+        if (!vr.ok || !vj?.ok) {
+          const nextFails = fails + 1;
+          emit("warn", `Incorrect. (${nextFails}/${CAPTCHA_MAX_FAILS})`);
+
+          if (nextFails >= CAPTCHA_MAX_FAILS) {
+            const lockUntil = Date.now() + CAPTCHA_LOCK_MS;
+            setCaptchaLockedUntil(lockUntil);
+            emit("err", `CAPTCHA LOCKED for ${fmtMs(CAPTCHA_LOCK_MS)} due to repeated failures.`);
+            setPrompt({ mode: "CAPTCHA_LOCKED", captchaLockedUntil: lockUntil });
+            return;
+          }
+
+          // Request a fresh server challenge for the next attempt (prevents brute forcing)
+          setPrompt({ ...prompt, captchaFails: nextFails } as any);
+          startCaptcha(purpose, (prompt as any).captchaPayload ?? {}, true); // ✅ force = true
+          return;
+
+        }
+      } catch {
+        emit("err", "Captcha verify failed (network). Try again.");
+        return;
+      }
+
+      // ✅ Server issued pass
+      const pass_id = String(vj?.pass_id ?? "").trim();
+      const expires_at = String(vj?.expires_at ?? "").trim();
+      const digs_left = vj?.digs_left == null ? null : Number(vj.digs_left);
+
+      if (pass_id && expires_at) {
+        saveCaptchaPass({
+          pass_id,
+          purpose,
+          expires_at,
+          digs_left,
+        });
       }
 
       emit("ok", `Correct. (${round}/${need})`);
@@ -3739,16 +3937,16 @@ export default function Page() {
       if (round >= need) {
         emit("ok", "CAPTCHA PASSED ✅");
 
-        // grant trust window for DIG
-        if (prompt.captchaPurpose === "DIG") {
-          setCaptchaTrust(Date.now() + CAPTCHA_TRUST_MS, CAPTCHA_TRUST_DIGS);
-          emit("sys", `Anti-bot trust granted: ${Math.floor(CAPTCHA_TRUST_MS / 60000)}m or ${CAPTCHA_TRUST_DIGS} digs.`);
+        // OPTIONAL: keep your client-only trust banner (not required for server enforcement)
+        if (purpose === "DIG") {
+          emit("sys", `Server pass granted (DIG). Digs left: ${digs_left ?? "?"}`);
         }
 
         await finishCaptchaAndContinue(prompt);
         return;
       }
 
+      // next round uses server challenge
       nextCaptchaRound(prompt);
       return;
     }

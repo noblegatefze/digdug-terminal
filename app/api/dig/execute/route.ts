@@ -95,6 +95,45 @@ async function getBoxAvailableFromLedger(box_id: string): Promise<number | null>
   return avail;
 }
 
+/** ---------------------------------------
+ * CAPTCHA PASS ENFORCEMENT (server-side)
+ * --------------------------------------*/
+async function requireCaptchaPassForDig(args: {
+  username: string;
+  install_id: string;
+  captcha_pass_id: string;
+}) {
+  const { username, install_id, captcha_pass_id } = args;
+
+  const { data: pass, error } = await sb
+    .from("dd_captcha_passes")
+    .select("*")
+    .eq("id", captcha_pass_id)
+    .single();
+
+  if (error || !pass) return { ok: false as const, error: "captcha_pass_not_found" };
+
+  if (String(pass.purpose) !== "DIG" || String(pass.username) !== username || String(pass.install_id) !== install_id) {
+    return { ok: false as const, error: "captcha_pass_scope_mismatch" };
+  }
+
+  const exp = new Date(String(pass.expires_at)).getTime();
+  if (!Number.isFinite(exp) || Date.now() > exp) return { ok: false as const, error: "captcha_pass_expired" };
+
+  const left = Number(pass.digs_left ?? 0);
+  if (!Number.isFinite(left) || left <= 0) return { ok: false as const, error: "captcha_pass_empty" };
+
+  // decrement dig allowance
+  const { error: e2 } = await sb
+    .from("dd_captcha_passes")
+    .update({ digs_left: left - 1 })
+    .eq("id", captcha_pass_id);
+
+  if (e2) return { ok: false as const, error: "captcha_pass_decrement_failed" };
+
+  return { ok: true as const, digs_left: left - 1 };
+}
+
 export async function POST(req: NextRequest) {
   try {
     if (process.env.DIGDUG_PAUSE === "1") {
@@ -102,11 +141,26 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json().catch(() => null);
+
     const username = String(body?.username ?? "").trim();
     const box_id = String(body?.box_id ?? "").trim();
 
+    // ✅ Server-side captcha enforcement fields
+    const install_id = String(body?.install_id ?? "").trim();
+    const captcha_pass_id = String(body?.captcha_pass_id ?? "").trim();
+
     if (!username || !box_id) {
       return NextResponse.json({ ok: false, error: "missing_fields" }, { status: 400 });
+    }
+
+    // CAPTCHA required (server side)
+    if (!install_id || !captcha_pass_id) {
+      return NextResponse.json({ ok: false, error: "captcha_required" }, { status: 403 });
+    }
+
+    const gate = await requireCaptchaPassForDig({ username, install_id, captcha_pass_id });
+    if (!gate.ok) {
+      return NextResponse.json({ ok: false, error: gate.error }, { status: 403 });
     }
 
     // 1) Resolve terminal user
@@ -193,7 +247,6 @@ export async function POST(req: NextRequest) {
     }
     const out: any = rdata;
     if (!out?.ok) {
-      // If the RPC returned a structured error (like insufficient_box_balance), preserve it.
       return NextResponse.json(out ?? { ok: false, error: "reserve_failed" }, { status: 400 });
     }
 
@@ -252,6 +305,9 @@ export async function POST(req: NextRequest) {
       find_tier,
       is_golden,
       reserve: out,
+
+      // helpful: tells client how many digs remain on this pass
+      captcha_digs_left: (gate as any)?.digs_left ?? null,
     });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message ?? "server_error" }, { status: 500 });
