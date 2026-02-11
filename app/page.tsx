@@ -3458,15 +3458,6 @@ export default function Page() {
       return;
     }
 
-    if (prompt.mode === "HELP_SELECT") {
-      if (trimmed === "1") printHelpContext("USER");
-      else if (trimmed === "2") printHelpContext("SPONSOR");
-      else if (trimmed === "3") printHelpContext("ADMIN");
-      else emit("warn", `Reply with ${C("1")}, ${C("2")} or ${C("3")}.`);
-      setPrompt({ mode: "IDLE" });
-      return;
-    }
-
     // auth prompts
     if (prompt.mode === "REG_USER") {
       const u = trimmed.replace(/\s+/g, "");
