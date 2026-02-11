@@ -45,12 +45,18 @@ type PromptMode =
   | "WITHDRAW_TREASURE_AMOUNT"
   | "WITHDRAW_TREASURE_ADDR"
   | "ADMIN_RESET_PICK"
+
+  // captcha prompts
+  | "CAPTCHA_CHALLENGE"
+  | "CAPTCHA_LOCKED"
+
   // wallet prompts
   | "WALLET_CONNECT_CHAIN_PICK"
   | "WALLET_CONNECT_LABEL"
   | "WALLET_CONNECT_ADDR"
   | "WALLET_SWITCH_PICK"
   | "WALLET_FORGET_PICK"
+
   // sponsor prompts
   | "SP_CREATE_CHAIN_PICK"
   | "SP_CREATE_DECLARATION_CONFIRM"
@@ -89,6 +95,16 @@ type PromptState = {
   spTempRandMin?: number;
   spPickList?: string[]; // campaign ids
   spMetaKey?: keyof SponsorMeta;
+
+  // captcha
+  captchaPurpose?: "REGISTER" | "DIG";
+  captchaRound?: number;         // 1..N
+  captchaNeed?: number;          // N (e.g. 3)
+  captchaFails?: number;         // per-run
+  captchaAnswer?: string;        // expected answer (normalized)
+  captchaPayload?: any;          // carry next action data (e.g. username or campaignId)
+  captchaLockedUntil?: number;   // epoch ms
+
 };
 
 type TerminalPass = {
@@ -824,6 +840,253 @@ export default function Page() {
 
   const [cmd, setCmd] = useState("");
   const [prompt, setPrompt] = useState<PromptState>({ mode: "IDLE" });
+
+  // -----------------------------
+  // CAPTCHA (anti-bot mini game)
+  // -----------------------------
+  const CAPTCHA_NEED = 3;                 // must solve N times
+  const CAPTCHA_MAX_FAILS = 4;            // lock after N fails
+  const CAPTCHA_LOCK_MS = 2 * 60_000;     // 2 min lock
+  const CAPTCHA_STORE_KEY = "dd_captcha_lock_v1";
+  const CAPTCHA_TRUST_MS = 30 * 60_000;      // 30 minutes trust window
+  const CAPTCHA_TRUST_DIGS = 10;             // or 10 digs, whichever first
+  const CAPTCHA_TRUST_KEY = "dd_captcha_trust_v1";
+
+  const normCaptcha = (s: string) => s.trim().toLowerCase();
+
+  function getCaptchaLockedUntil(): number {
+    try {
+      const raw = localStorage.getItem(CAPTCHA_STORE_KEY);
+      const n = raw ? Number(raw) : 0;
+      return Number.isFinite(n) ? n : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  function setCaptchaLockedUntil(ts: number) {
+    try {
+      localStorage.setItem(CAPTCHA_STORE_KEY, String(ts));
+    } catch { }
+  }
+
+  type CaptchaTrust = { until: number; digsLeft: number };
+
+  function getCaptchaTrust(): CaptchaTrust | null {
+    try {
+      const raw = localStorage.getItem(CAPTCHA_TRUST_KEY);
+      if (!raw) return null;
+      const j = JSON.parse(raw);
+      const until = Number(j?.until ?? 0);
+      const digsLeft = Number(j?.digsLeft ?? 0);
+      if (!Number.isFinite(until) || !Number.isFinite(digsLeft)) return null;
+      return { until, digsLeft };
+    } catch {
+      return null;
+    }
+  }
+
+  function setCaptchaTrust(until: number, digsLeft: number) {
+    try {
+      localStorage.setItem(CAPTCHA_TRUST_KEY, JSON.stringify({ until, digsLeft }));
+    } catch { }
+  }
+
+  function clearCaptchaTrust() {
+    try {
+      localStorage.removeItem(CAPTCHA_TRUST_KEY);
+    } catch { }
+  }
+
+  function isCaptchaTrusted(): boolean {
+    const t = getCaptchaTrust();
+    if (!t) return false;
+    if (Date.now() > t.until) return false;
+    if (t.digsLeft <= 0) return false;
+    return true;
+  }
+
+  function consumeCaptchaDig() {
+    const t = getCaptchaTrust();
+    if (!t) return;
+    const next = { ...t, digsLeft: Math.max(0, t.digsLeft - 1) };
+    setCaptchaTrust(next.until, next.digsLeft);
+  }
+
+  type CaptchaQ = { question: string; answer: string };
+
+  function randInt(a: number, b: number) {
+    return Math.floor(a + Math.random() * (b - a + 1));
+  }
+
+  // Challenge types: designed to be annoying for bots but easy for humans
+  function makeCaptchaQuestion(): CaptchaQ {
+    const kind = randInt(1, 4);
+
+    // 1) simple math with distraction
+    if (kind === 1) {
+      const a = randInt(7, 19);
+      const b = randInt(3, 12);
+      const c = randInt(2, 9);
+      const question = `CAPTCHA: Solve: (${a} + ${b}) × ${c}  (numbers only)`;
+      const answer = String((a + b) * c);
+      return { question, answer };
+    }
+
+    // 2) reverse a short string (bots often fail if we randomize format)
+    if (kind === 2) {
+      const pool = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+      const s = Array.from({ length: 5 }, () => pool[randInt(0, pool.length - 1)]).join("");
+      const question = `CAPTCHA: Type this BACKWARDS: ${s}`;
+      const answer = s.split("").reverse().join("").toLowerCase();
+      return { question, answer };
+    }
+
+    // 3) count characters
+    if (kind === 3) {
+      const ch = ["@", "#", "$", "%", "&"][randInt(0, 4)];
+      const n = randInt(6, 12);
+      const noise = Array.from({ length: n }, () => (Math.random() < 0.45 ? ch : ".")).join("");
+      const question = `CAPTCHA: How many '${ch}' in: ${noise}  (answer is a number)`;
+      const answer = String(noise.split(ch).length - 1);
+      return { question, answer };
+    }
+
+    // 4) keyboard sequence repeat (human pattern)
+    const seqs = ["qwe", "asd", "zxc", "poi", "jkl", "mnb"];
+    const base = seqs[randInt(0, seqs.length - 1)];
+    const reps = randInt(2, 4);
+    const shown = Array.from({ length: reps }, () => base).join("-");
+    const question = `CAPTCHA: Type exactly: ${shown}`;
+    const answer = shown.toLowerCase();
+    return { question, answer };
+  }
+
+  function startCaptcha(purpose: "REGISTER" | "DIG", payload: any) {
+    const lockedUntil = getCaptchaLockedUntil();
+    const now = Date.now();
+    if (lockedUntil && now < lockedUntil) {
+      const left = lockedUntil - now;
+      emit("warn", `CAPTCHA LOCKED. Try again in ${fmtMs(left)}.`);
+      setPrompt({ mode: "CAPTCHA_LOCKED", captchaLockedUntil: lockedUntil });
+      return;
+    }
+
+    // ✅ If already trusted, skip captcha for DIG
+    if (purpose === "DIG" && isCaptchaTrusted()) {
+      const t = getCaptchaTrust();
+      emit("sys", `Anti-bot: trusted ✅ (${t?.digsLeft ?? 0} digs left)`);
+      // continue immediately (no captcha)
+      void finishCaptchaAndContinue({
+        mode: "CAPTCHA_CHALLENGE",
+        captchaPurpose: "DIG",
+        captchaPayload: payload,
+      } as any);
+      return;
+    }
+
+    const q = makeCaptchaQuestion();
+    emit("warn", "ANTI-BOT CHECK (Terminal CAPTCHA)");
+    emit("sys", `You must pass ${CAPTCHA_NEED} checks. Type ${C("cancel")} to abort.`);
+    emit("info", q.question);
+    emit("sys", `Round: 1/${CAPTCHA_NEED}`);
+
+    setPrompt({
+      mode: "CAPTCHA_CHALLENGE",
+      captchaPurpose: purpose,
+      captchaPayload: payload,
+      captchaRound: 1,
+      captchaNeed: CAPTCHA_NEED,
+      captchaFails: 0,
+      captchaAnswer: normCaptcha(q.answer),
+    });
+  }
+
+  function nextCaptchaRound(prev: PromptState) {
+    const round = (prev.captchaRound ?? 1) + 1;
+    const need = prev.captchaNeed ?? CAPTCHA_NEED;
+    const q = makeCaptchaQuestion();
+
+    emit("info", q.question);
+    emit("sys", `Round: ${round}/${need}`);
+
+    setPrompt({
+      ...prev,
+      mode: "CAPTCHA_CHALLENGE",
+      captchaRound: round,
+      captchaAnswer: normCaptcha(q.answer),
+    });
+  }
+
+  async function finishCaptchaAndContinue(prev: PromptState) {
+    const purpose = prev.captchaPurpose!;
+    const payload = prev.captchaPayload;
+
+    setPrompt({ mode: "IDLE" });
+
+    if (purpose === "REGISTER") {
+      // Continue the existing register flow by calling the server
+      const u = String(payload?.username ?? "").trim();
+      if (!u) {
+        emit("err", "Register aborted: missing username.");
+        return;
+      }
+
+      emit("sys", "Creating Terminal Pass...");
+      try {
+        const r = await fetch("/api/auth/register", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ username: u }),
+        });
+
+        const data = (await r.json()) as any;
+
+        if (!r.ok) {
+          emit("err", data?.error ?? `Register failed (HTTP ${r.status})`);
+          emit("info", "NEXT");
+          emit("sys", `Next: ${C("register")}`);
+          return;
+        }
+
+        const pass = String(data.terminal_pass ?? "");
+        if (!pass) {
+          emit("err", "Register failed: missing terminal_pass.");
+          return;
+        }
+
+        const tp: TerminalPass = {
+          username: u,
+          passHash: passHashOf(pass),
+          createdAt: Date.now(),
+          twoFaEnabled: false,
+        };
+
+        setTerminalPass(tp);
+
+        emit("ok", `Terminal Pass claimed: ${G(u)}`);
+        emit("warn", `SAVE THIS PASS (you will need it to login): ${G(pass)}`);
+        emit("sys", "");
+        emit("info", "NEXT");
+        emit("sys", `Next: ${C("user")}`);
+        emit("sys", `Or: ${C("sponsor")}`);
+      } catch (e: any) {
+        emit("err", `Register failed: ${e?.message ?? "Unknown error"}`);
+      }
+      return;
+    }
+
+    if (purpose === "DIG") {
+      const boxId = String(payload?.box_id ?? "");
+      const c = campaignsRef.current.find((x) => x.id === boxId) ?? null;
+      if (!c) {
+        emit("err", "Dig aborted: box not found.");
+        return;
+      }
+      await executeDig(c);
+      return;
+    }
+  }
 
   const [terminalPass, setTerminalPass] = useState<TerminalPass | null>(null);
   const [paused, setPaused] = useState(false);
@@ -2578,6 +2841,7 @@ export default function Page() {
     }
 
     await performDig(campaign);
+    consumeCaptchaDig();
 
   };
 
@@ -3429,6 +3693,78 @@ export default function Page() {
 
     emit("cmd", `> ${trimmed.length === 0 ? "" : trimmed}`);
 
+    // -----------------------------
+    // CAPTCHA prompt handler
+    // -----------------------------
+    if (prompt.mode === "CAPTCHA_CHALLENGE") {
+      const need = prompt.captchaNeed ?? CAPTCHA_NEED;
+      const round = prompt.captchaRound ?? 1;
+      const fails = prompt.captchaFails ?? 0;
+
+      const expected = normCaptcha(prompt.captchaAnswer ?? "");
+      const got = normCaptcha(trimmed);
+
+      if (!expected) {
+        emit("err", "Captcha internal error. Try again.");
+        setPrompt({ mode: "IDLE" });
+        return;
+      }
+
+      if (got !== expected) {
+        const nextFails = fails + 1;
+        emit("warn", `Incorrect. (${nextFails}/${CAPTCHA_MAX_FAILS})`);
+
+        if (nextFails >= CAPTCHA_MAX_FAILS) {
+          const lockUntil = Date.now() + CAPTCHA_LOCK_MS;
+          setCaptchaLockedUntil(lockUntil);
+          emit("err", `CAPTCHA LOCKED for ${fmtMs(CAPTCHA_LOCK_MS)} due to repeated failures.`);
+          setPrompt({ mode: "CAPTCHA_LOCKED", captchaLockedUntil: lockUntil });
+          return;
+        }
+
+        // fresh question after each fail (prevents brute forcing)
+        const q2 = makeCaptchaQuestion();
+        emit("info", q2.question);
+
+        setPrompt({
+          ...prompt,
+          captchaFails: nextFails,
+          captchaAnswer: normCaptcha(q2.answer),
+        });
+        return;
+      }
+
+      emit("ok", `Correct. (${round}/${need})`);
+
+      if (round >= need) {
+        emit("ok", "CAPTCHA PASSED ✅");
+
+        // grant trust window for DIG
+        if (prompt.captchaPurpose === "DIG") {
+          setCaptchaTrust(Date.now() + CAPTCHA_TRUST_MS, CAPTCHA_TRUST_DIGS);
+          emit("sys", `Anti-bot trust granted: ${Math.floor(CAPTCHA_TRUST_MS / 60000)}m or ${CAPTCHA_TRUST_DIGS} digs.`);
+        }
+
+        await finishCaptchaAndContinue(prompt);
+        return;
+      }
+
+      nextCaptchaRound(prompt);
+      return;
+    }
+
+    if (prompt.mode === "CAPTCHA_LOCKED") {
+      const until = prompt.captchaLockedUntil ?? getCaptchaLockedUntil();
+      const now = Date.now();
+      if (until && now < until) {
+        emit("warn", `CAPTCHA still locked. Try again in ${fmtMs(until - now)}.`);
+        return;
+      }
+      emit("ok", "CAPTCHA lock cleared. Try again.");
+      setPrompt({ mode: "IDLE" });
+      return;
+    }
+
     if (prompt.mode === "DOCS_SELECT") {
       if (trimmed === "1") {
         window.open(DOCS.genesis, "_blank", "noopener,noreferrer");
@@ -3463,53 +3799,14 @@ export default function Page() {
       const u = trimmed.replace(/\s+/g, "");
       if (u.length < 3) return void emit("warn", "Username too short.");
 
-      // DB-backed registration (Phase Zero)
-      emit("sys", "Creating Terminal Pass...");
-      setPrompt({ mode: "IDLE" });
+      if (prompt.mode === "REG_USER") {
+        const u = trimmed.replace(/\s+/g, "");
+        if (u.length < 3) return void emit("warn", "Username too short.");
 
-      void (async () => {
-        try {
-          const r = await fetch("/api/auth/register", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ username: u }),
-          });
-
-          const data = (await r.json()) as any;
-
-          if (!r.ok) {
-            emit("err", data?.error ?? `Register failed (HTTP ${r.status})`);
-            emit("info", "NEXT");
-            emit("sys", `Next: ${C("register")}`);
-            return;
-          }
-
-          const pass = String(data.terminal_pass ?? "");
-          if (!pass) {
-            emit("err", "Register failed: missing terminal_pass.");
-            return;
-          }
-
-          // Store a local session (Phase Zero)
-          const tp: TerminalPass = {
-            username: u,
-            passHash: passHashOf(pass), // local-only marker
-            createdAt: Date.now(),
-            twoFaEnabled: false,
-          };
-
-          setTerminalPass(tp);
-
-          emit("ok", `Terminal Pass claimed: ${G(u)}`);
-          emit("warn", `SAVE THIS PASS (you will need it to login): ${G(pass)}`);
-          emit("sys", "");
-          emit("info", "NEXT");
-          emit("sys", `Next: ${C("user")}`);
-          emit("sys", `Or: ${C("sponsor")}`);
-        } catch (e: any) {
-          emit("err", `Register failed: ${e?.message ?? "Unknown error"}`);
-        }
-      })();
+        // 🔒 Start CAPTCHA before actual registration
+        startCaptcha("REGISTER", { username: u });
+        return;
+      }
 
       return;
     }
@@ -3788,7 +4085,11 @@ export default function Page() {
         return;
       }
       setPrompt({ mode: "IDLE" });
-      void executeDig(c);
+
+      // 🔒 CAPTCHA before dig execute
+      startCaptcha("DIG", { box_id: c.id });
+      return;
+
       return;
     }
 
