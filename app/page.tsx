@@ -3936,33 +3936,6 @@ export default function Page() {
       return;
     }
 
-    if (prompt.mode === "SP_HARDGATE_CONFIRM") {
-      if (isNo(trimmed)) {
-        emit("sys", "Sponsor flow aborted.");
-        setPrompt({ mode: "IDLE" });
-        return;
-      }
-      if (!isYes(trimmed)) return void emit("warn", `Reply ${C("Y")} or ${C("N")}.`);
-      if (!requireWallet()) {
-        setPrompt({ mode: "IDLE" });
-        return;
-      }
-      emit("info", "Select chain for Treasure Box deployment:");
-      CHAINS.forEach((c, idx) => emit("info", `- ${C(String(idx + 1))}) ${c.label} (${c.standard})`));
-      emit("info", `Reply with ${C("1")}—${C(String(CHAINS.length))}:`);
-      setPrompt({ mode: "SP_CHAIN_PICK" });
-      return;
-    }
-
-    if (prompt.mode === "SP_CHAIN_PICK") {
-      const n = Number(trimmed);
-      if (!Number.isFinite(n) || n < 1 || n > CHAINS.length) return void emit("warn", "Invalid selection.");
-      const chainId = CHAINS[n - 1].id;
-      sponsorDeployBox(chainId);
-      setPrompt({ mode: "IDLE" });
-      return;
-    }
-
     if (prompt.mode === "SP_TOKEN_ADDRESS") {
       const addr = trimmed;
       if (!looksLikeAddress(addr)) return void emit("warn", "Invalid contract address.");
