@@ -3514,24 +3514,6 @@ export default function Page() {
       return;
     }
 
-    if (prompt.mode === "REG_PASS") {
-      const pw = trimmed;
-      if (pw.length < 6) return void emit("warn", "Password too short (min 6).");
-      const u = prompt.authUser!;
-      const tp: TerminalPass = { username: u, passHash: passHashOf(pw), createdAt: Date.now(), twoFaEnabled: false };
-      const users = loadUsers();
-      users[u] = tp;
-      saveUsers(users);
-      setTerminalPass(tp);
-      emit("ok", `Terminal Pass claimed: ${G(u)}`);
-      emit("sys", "");
-      emit("info", "NEXT");
-      emit("sys", `Next: ${C("user")}`);
-      emit("sys", `Or: ${C("sponsor")}`);
-      setPrompt({ mode: "IDLE" });
-      return;
-    }
-
     if (prompt.mode === "LOGIN_USER") {
       const u = trimmed.replace(/\s+/g, "");
       if (u.length < 3) return void emit("warn", "Enter a valid username.");
