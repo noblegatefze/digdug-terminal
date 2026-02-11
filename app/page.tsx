@@ -2432,7 +2432,13 @@ export default function Page() {
 
     const { ready, remaining, capHit } = allocationStatus();
     const digs = Number.isFinite(digsCountRef.current) ? digsCountRef.current : 0;
-    const finds = Number.isFinite(findsCountRef.current) ? findsCountRef.current : 0;
+
+    // ✅ Finds should never be 0 if we have claims loaded
+    const findsFromClaims = claimsRef.current.filter((c) => c.kind === "TREASURE").length;
+    const finds = Math.max(
+      Number.isFinite(findsCountRef.current) ? findsCountRef.current : 0,
+      findsFromClaims
+    );
 
     emit("sys", `MODE: ${consoleModeRef.current} - AUTO-SCROLL: ${autoScroll ? "ON" : "OFF"}`);
     emit("info", `Terminal Pass: ${authedUser ? G(authedUser) : "NONE"}`);
