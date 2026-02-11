@@ -1473,6 +1473,9 @@ export default function Page() {
     usdddAcquiredRef.current = acq;
     treasuryRef.current = tre;
 
+    // ✅ keep total ref in sync immediately (fixes Fuel remaining print)
+    usdddTotalRef.current = alloc + acq;
+
     // Commit React state (drawer balance uses state)
     setUsdddAllocated(alloc);
     setUsdddAcquired(acq);
