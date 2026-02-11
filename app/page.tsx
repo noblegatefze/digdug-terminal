@@ -1212,6 +1212,16 @@ export default function Page() {
 
         setTerminalPass(tp);
 
+        // ✅ Welcome + onboarding message (register only)
+        emit("sys", "");
+        emit("ok", `Welcome to DIGDUG.DO, ${G(u)} ✅`);
+        emit("sys", "You’ve been allocated 10.00 USDDD (spendable on digs, not withdrawable).");
+        emit("sys", `Daily fuel: type ${C("claim")} to claim +5 USDDD every 24h.`);
+        emit("sys", "");
+
+        // ✅ Immediately sync canonical fuel/counters so status is correct without refresh
+        void hydrateUserState(u);
+
         emit("ok", `Terminal Pass claimed: ${G(u)}`);
         emit("warn", `SAVE THIS PASS (you will need it to login): ${G(pass)}`);
         emit("sys", "");
@@ -1385,6 +1395,89 @@ export default function Page() {
       return false;
     }
   };
+
+  async function hydrateUserState(username: string) {
+    try {
+      const res = await fetch("/api/user/state", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username }),
+      });
+
+      const json = await res.json().catch(() => null);
+      if (!json?.ok) return;
+
+      terminalUserIdRef.current = String(json?.user?.id ?? "") || null;
+      setPaused(Boolean(json?.flags?.pause_all));
+
+      const allocated = Number(json?.usddd?.allocated ?? 0);
+      const acquired = Number(json?.usddd?.acquired ?? 0);
+      const treasury = Number(json?.usddd?.treasury ?? 0);
+      const acquiredTotal2 = Number(json?.usddd?.acquiredTotal ?? 0);
+
+      if (Number.isFinite(allocated)) {
+        setUsdddAllocated(allocated);
+        usdddAllocatedRef.current = allocated;
+      }
+      if (Number.isFinite(acquired)) {
+        setUsdddAcquired(acquired);
+        usdddAcquiredRef.current = acquired;
+      }
+      if (Number.isFinite(treasury)) {
+        setTreasuryUSDDD(treasury);
+        treasuryRef.current = treasury;
+      }
+      if (Number.isFinite(acquiredTotal2)) {
+        setAcquiredTotal(acquiredTotal2);
+      }
+
+      // Counters (if present)
+      const digs = Number(json?.counters?.digs ?? 0);
+      const finds = Number(json?.counters?.finds ?? 0);
+
+      if (Number.isFinite(digs)) digsCountRef.current = digs;
+      if (Number.isFinite(finds)) findsCountRef.current = Math.min(finds, digsCountRef.current);
+    } catch {
+      // soft-fail
+    }
+  }
+
+  function applyLocalFuelSpend(cost: number) {
+    const spend = Number(cost);
+    if (!Number.isFinite(spend) || spend <= 0) return;
+
+    // Spend allocated first (non-withdrawable), then acquired
+    let alloc = Number(usdddAllocatedRef.current ?? 0);
+    let acq = Number(usdddAcquiredRef.current ?? 0);
+    let tre = Number(treasuryRef.current ?? 0);
+
+    if (!Number.isFinite(alloc)) alloc = 0;
+    if (!Number.isFinite(acq)) acq = 0;
+    if (!Number.isFinite(tre)) tre = 0;
+
+    let remaining = spend;
+
+    const fromAlloc = Math.min(alloc, remaining);
+    alloc -= fromAlloc;
+    remaining -= fromAlloc;
+
+    const fromAcq = Math.min(acq, remaining);
+    acq -= fromAcq;
+    remaining -= fromAcq;
+
+    // Add to fuel used
+    tre += (fromAlloc + fromAcq);
+
+    // Commit refs first (status uses refs)
+    usdddAllocatedRef.current = alloc;
+    usdddAcquiredRef.current = acq;
+    treasuryRef.current = tre;
+
+    // Commit React state (drawer balance uses state)
+    setUsdddAllocated(alloc);
+    setUsdddAcquired(acq);
+    setTreasuryUSDDD(tre);
+  }
 
   const sendStat = async (event: string, payload?: Record<string, any>) => {
     // best-effort; caller may await for DB consistency
@@ -1827,6 +1920,17 @@ export default function Page() {
 
         setClaims(dbClaims);
         setTreasureBalances(recomputeTreasureBalancesForUser(authedUser, dbClaims));
+        // ✅ Make status counters truthy from DB claims (prevents Finds=0 after refresh)
+        const totalFinds = dbClaims.filter((c) => c?.kind === "TREASURE").length;
+
+        // If counters are missing/laggy, use claims as truth for Finds.
+        // Also ensure Digs is at least Finds (status should never show Finds > Digs).
+        if (Number.isFinite(totalFinds)) {
+          findsCountRef.current = totalFinds;
+          const digsNow = Number.isFinite(digsCountRef.current) ? digsCountRef.current : 0;
+          if (digsNow < totalFinds) digsCountRef.current = totalFinds;
+        }
+
       } catch {
         // ignore; do not wipe local state
       }
@@ -2808,9 +2912,13 @@ export default function Page() {
       digId = String(out.dig_id ?? digId);
       rewardAmt = Number(out.reward_amount ?? 0);
       sym = String(out.token_symbol ?? sym);
+      const claimId = String(out?.claim_id ?? out?.claim?.id ?? "");
 
       // optional: if server ever returns pricing later
       usdPrice = out?.reward_price_usd != null ? Number(out.reward_price_usd) : null;
+      // ✅ Apply fuel spend immediately for UX (server is still canonical)
+      applyLocalFuelSpend(campaign.costUSDDD);
+
     } catch (e: any) {
       emit("warn", `Dig failed (network). No fuel spent.`);
       return;
@@ -2825,7 +2933,7 @@ export default function Page() {
 
     // Add claim to UI (DB already has the authoritative record)
     const newClaim: TreasureClaim = {
-      id: uid("clm"),
+      id: claimId || uid("clm"),
       user: authedUser,
       kind: "TREASURE",
       campaignId: campaign.id,

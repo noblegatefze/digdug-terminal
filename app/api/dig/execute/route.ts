@@ -267,32 +267,37 @@ export async function POST(req: NextRequest) {
 
     const is_golden = false;
 
-    // 8) Insert claim after reserve
-    const { error: cerr } = await sb.from("dd_treasure_claims").insert({
-      user_id: user.id,
-      username: user.username,
-      box_id,
-      dig_id,
-      chain_id,
-      token_address,
-      token_symbol,
-      amount: reward_amount,
-      status: "CLAIMED",
-      find_tier,
-      is_golden,
-    });
+    // 8) Insert claim after reserve (RETURN inserted row)
+    const { data: claimRow, error: cerr } = await sb
+      .from("dd_treasure_claims")
+      .insert({
+        user_id: user.id,
+        username: user.username,
+        box_id,
+        dig_id,
+        chain_id,
+        token_address,
+        token_symbol,
+        amount: reward_amount,
+        status: "CLAIMED",
+        find_tier,
+        is_golden,
+      })
+      .select("id")
+      .single();
 
-    if (cerr) {
-      const code = (cerr as any)?.code;
-      if (code !== "23505") {
-        return NextResponse.json({ ok: false, error: "claim_insert_failed", detail: cerr.message }, { status: 500 });
-      }
+    if (cerr && (cerr as any)?.code !== "23505") {
+      return NextResponse.json(
+        { ok: false, error: "claim_insert_failed", detail: cerr.message },
+        { status: 500 }
+      );
     }
 
     // 9) Return canonical result + tier info
     return NextResponse.json({
       ok: true,
       dig_id,
+      claim_id: claimRow?.id ?? null,
       box_id,
       username,
       cost_usddd: cost,
