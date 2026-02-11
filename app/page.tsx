@@ -2880,6 +2880,7 @@ export default function Page() {
     let rewardAmt = 0;
     let sym = campaign.tokenSymbol ?? "TOKEN";
     let usdPrice: number | null = null;
+    let claimId = "";
 
     try {
       const r = await fetch("/api/dig/execute", {
@@ -2912,7 +2913,7 @@ export default function Page() {
       digId = String(out.dig_id ?? digId);
       rewardAmt = Number(out.reward_amount ?? 0);
       sym = String(out.token_symbol ?? sym);
-      const claimId = String(out?.claim_id ?? out?.claim?.id ?? "");
+      claimId = String(out?.claim_id ?? out?.claim?.id ?? "");
 
       // optional: if server ever returns pricing later
       usdPrice = out?.reward_price_usd != null ? Number(out.reward_price_usd) : null;
