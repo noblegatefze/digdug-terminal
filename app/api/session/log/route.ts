@@ -27,6 +27,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "missing session_id" }, { status: 400 });
     }
 
+    const install_id = body.install_id ? String(body.install_id).trim() : "";
     const username = body.username ? String(body.username).trim() : "";
     const source = body.source ? String(body.source).trim() : "terminal";
 
@@ -36,6 +37,7 @@ export async function POST(req: Request) {
 
     // Resolve user_id from username if not provided
     let resolvedUserId: string | null = body.user_id ? String(body.user_id).trim() : null;
+
     if (!resolvedUserId && username) {
       const { data: tu, error: tuErr } = await supabase
         .from("dd_terminal_users")
@@ -44,19 +46,17 @@ export async function POST(req: Request) {
         .limit(1)
         .single();
 
-      if (!tuErr && tu?.id) {
-        resolvedUserId = String(tu.id);
-      }
+      if (!tuErr && tu?.id) resolvedUserId = String(tu.id);
       // If terminal user not found, we still log session with username only (non-blocking)
     }
 
-    // Prefer upsert so we can later attach user_id if a prior insert happened with null user_id
-    const { error } = await supabase
+    // Always log the current session row (idempotent)
+    const { error: upsertErr } = await supabase
       .from("dd_sessions")
       .upsert(
         {
           session_id,
-          install_id: body.install_id ?? null,
+          install_id: install_id || null,
           user_id: resolvedUserId ?? null,
           username: username || null,
           source,
@@ -64,8 +64,28 @@ export async function POST(req: Request) {
         { onConflict: "session_id" }
       );
 
-    if (error) {
-      return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    if (upsertErr) {
+      return NextResponse.json({ ok: false, error: upsertErr.message }, { status: 500 });
+    }
+
+    // ✅ Ledger-grade: if identity is known, attach it to the latest install-only session row
+    // This fixes the common case: first load logged as anonymous, later load resolves username/user_id.
+    if (install_id && resolvedUserId && username) {
+      const { error: rpcErr } = await supabase.rpc("rpc_session_attach_user", {
+        p_install_id: install_id,     // TEXT in DB
+        p_user_id: resolvedUserId,    // UUID
+        p_username: username,
+      });
+
+      // Non-blocking: we don't fail session logging if attach fails.
+      // But we return the error for visibility (optional).
+      if (rpcErr) {
+        return NextResponse.json({
+          ok: true,
+          user_id: resolvedUserId,
+          attach_warning: rpcErr.message,
+        });
+      }
     }
 
     return NextResponse.json({ ok: true, user_id: resolvedUserId ?? null });
