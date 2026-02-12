@@ -26,19 +26,6 @@ const GAP_JITTER_MAX_SECONDS = 60 * 60; // +0–60 min unpredictability (server-
 // ------------------------------------------------------------
 // Emergency anti-storm patch (server-side only)
 // ------------------------------------------------------------
-//
-// Why: dd_take_golden_slot was called millions of times.
-// This route MUST tolerate spam without hammering Supabase.
-//
-// This patch does NOT change golden logic; it only throttles
-// how often this endpoint can attempt a golden slot.
-//
-// Notes:
-// - Uses in-memory cache per server instance (Vercel lambda).
-// - Also uses per-identity short cooldowns to prevent tight loops.
-// - Includes in-flight de-dupe to avoid concurrency stampedes.
-// ------------------------------------------------------------
-
 const GLOBAL_MIN_CALL_MS = 30_000; // never attempt golden slot more often than every 30s per instance
 const IDENTITY_COOLDOWN_MS = 20_000; // per-user/install/ip cooldown window
 const SUCCESS_CACHE_MS = 30_000; // cache positive golden result briefly
@@ -63,15 +50,12 @@ function nowMs() {
 }
 
 function getIp(req: Request): string {
-  // Vercel / proxies: x-forwarded-for may contain a list
   const xf = req.headers.get("x-forwarded-for") || "";
   const ip = xf.split(",")[0]?.trim();
   return ip || req.headers.get("x-real-ip") || "ip:unknown";
 }
 
 function cooldownKey(parts: { username?: string; install_id?: string; ip?: string }) {
-  // Use stable-ish keys; username is strongest. install_id if provided.
-  // Fall back to IP if nothing else.
   if (parts.username) return `u:${parts.username.toLowerCase()}`;
   if (parts.install_id) return `i:${parts.install_id}`;
   if (parts.ip) return `p:${parts.ip}`;
@@ -153,6 +137,11 @@ function inferBroadcastSent(out: any): boolean {
   return false;
 }
 
+function asNum(v: any, fallback = 0): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 async function handle(req: Request): Promise<NextResponse> {
   const ADMIN_KEY = process.env.ADMIN_API_KEY;
   if (!ADMIN_KEY) {
@@ -167,11 +156,10 @@ async function handle(req: Request): Promise<NextResponse> {
   const chain = String(body.chain ?? "").trim();
   const username = String(body.username ?? "").trim();
 
-  // Optional identity fields if caller provides them (does not break if missing)
   const install_id = String(body.install_id ?? "").trim();
 
-  // ✅ NEW: accept dig_id so we can canonically join Golden ↔ Rewards by dig_id
-  // Optional; doesn't break callers who don't send it.
+  // ✅ REQUIRED now: dig_id must be present and must be the REAL server dig_id (not the early fallback id)
+  // Reason: we want dd_tg_golden_events always linkable to canonical claims/spend.
   let dig_id: string | null = String(body.dig_id ?? body.digId ?? "").trim();
   if (!dig_id) dig_id = null;
 
@@ -186,10 +174,15 @@ async function handle(req: Request): Promise<NextResponse> {
     setCache(out, NEGATIVE_CACHE_MS);
     return NextResponse.json(out);
   }
-
-  // Require username to proceed past pacing/rpc
   if (!username) {
     const out = { ok: true, golden: false, reason: "missing_username" };
+    setCache(out, NEGATIVE_CACHE_MS);
+    return NextResponse.json(out);
+  }
+
+  // ✅ NEW HARD GUARD
+  if (!dig_id) {
+    const out = { ok: true, golden: false, reason: "missing_dig_id" };
     setCache(out, NEGATIVE_CACHE_MS);
     return NextResponse.json(out);
   }
@@ -198,11 +191,9 @@ async function handle(req: Request): Promise<NextResponse> {
   // Anti-storm checks BEFORE calling Supabase
   // ------------------------------------------------------------
 
-  // Serve global cache if warm (covers bursts)
   const cached = shouldServeCache();
   if (cached) return NextResponse.json(cached.body);
 
-  // Global throttle: never attempt more often than GLOBAL_MIN_CALL_MS
   const n = nowMs();
   if (n - _lastAttemptAt < GLOBAL_MIN_CALL_MS) {
     const out = { ok: true, golden: false, reason: "server_throttled" };
@@ -210,7 +201,6 @@ async function handle(req: Request): Promise<NextResponse> {
     return NextResponse.json(out);
   }
 
-  // Per-identity cooldown (prevents single client tight loop)
   const ip = getIp(req);
   const key = cooldownKey({ username, install_id, ip });
   const until = _cooldowns.get(key) ?? 0;
@@ -220,25 +210,20 @@ async function handle(req: Request): Promise<NextResponse> {
     return NextResponse.json(out);
   }
 
-  // Set cooldown immediately (even if later fails) to stop retry storms
   _cooldowns.set(key, n + IDENTITY_COOLDOWN_MS);
 
-  // Hard-prune cooldown map occasionally (keep it bounded)
   if (_cooldowns.size > 50_000) {
-    const cutoff = n - 5 * 60_000; // 5 minutes old
+    const cutoff = n - 5 * 60_000;
     for (const [k, t] of _cooldowns) {
       if (t < cutoff) _cooldowns.delete(k);
     }
   }
 
-  // Mark global attempt time (prevents multi-request stampede)
   _lastAttemptAt = n;
 
   const dayStr = todayUTCDateString();
 
-  // Dynamic pacing:
-  // Spread remaining slots across remaining time with a floor (2h).
-  // Conservative baseline: 24h/5 * 0.6 ≈ 2.88h, floored at 2h.
+  // Dynamic pacing
   const msLeft = msUntilNextUtcReset(new Date());
   const baselineGap = Math.floor(msLeft / 1000 / DAILY_CAP * 0.6);
   const jitterExtraSeconds = crypto.randomInt(0, GAP_JITTER_MAX_SECONDS + 1);
@@ -254,7 +239,6 @@ async function handle(req: Request): Promise<NextResponse> {
   if (slotErr) {
     console.error("[golden] slot rpc failed:", slotErr);
     const out = { ok: false, error: "slot_rpc_failed", detail: slotErr.message };
-    // Cache failures briefly to avoid instant retry storms
     setCache(out, NEGATIVE_CACHE_MS);
     return NextResponse.json(out, { status: 500 });
   }
@@ -291,7 +275,7 @@ async function handle(req: Request): Promise<NextResponse> {
 
   const tg_user_id = (linkRows?.[0] as any)?.tg_user_id ?? null;
 
-  // 3) Insert event (broadcasted_at set only after successful send)
+  // 3) Insert TG event (broadcasted_at set only after successful send)
   let claim_code = genClaimCode();
   let golden_event_id: string | null = null;
 
@@ -307,7 +291,7 @@ async function handle(req: Request): Promise<NextResponse> {
         token,
         chain,
         usd_value: usdValue,
-        dig_id, // ✅ NEW
+        dig_id, // ✅ REQUIRED + ALWAYS STORED
         broadcasted_at: null,
       })
       .select("id")
@@ -364,13 +348,87 @@ async function handle(req: Request): Promise<NextResponse> {
     if (bErr) console.error("[golden] broadcasted_at update failed:", bErr);
   }
 
+  // ------------------------------------------------------------
+  // ✅ NEW: Canonical Golden Claim (ledger-first)
+  //
+  // Insert a *separate* claim row:
+  // - box_id = 'golden' so we don't violate UNIQUE (box_id, dig_id)
+  // - dig_id = same dig
+  // - is_golden = true
+  // - find_tier = 'GOLDEN FIND'
+  //
+  // Compute amount from usd_value / price_usd_at_claim using snapshots.
+  // Best effort; if price is missing, insert amount=0 (still keeps canonical trail).
+  // ------------------------------------------------------------
+
+  try {
+    const chainIdNum = asNum(chain, 0);
+    let token_address: string | null = null;
+
+    // Try resolve token_address via dd_boxes (symbol + chain)
+    const { data: boxRow, error: boxErr } = await supabaseAdmin
+      .from("dd_boxes")
+      .select("token_address")
+      .eq("token_symbol", token)
+      .eq("deploy_chain_id", chainIdNum)
+      .limit(1)
+      .maybeSingle();
+
+    if (!boxErr) {
+      const addr = String((boxRow as any)?.token_address ?? "").trim();
+      token_address = addr || null;
+    }
+
+    // Snapshot price <= now
+    let price_usd = 0;
+    if (token_address) {
+      const { data: pxRow, error: pxErr } = await supabaseAdmin
+        .from("dd_token_price_snapshots_addr")
+        .select("price_usd")
+        .eq("chain_id", chainIdNum)
+        .eq("token_address", token_address)
+        .lte("as_of", new Date().toISOString())
+        .order("as_of", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!pxErr) price_usd = asNum((pxRow as any)?.price_usd ?? 0, 0);
+    }
+
+    const amount = price_usd > 0 ? usdValue / price_usd : 0;
+
+    // Insert golden claim row (idempotent by UNIQUE(box_id='golden', dig_id))
+    const { error: gErr } = await supabaseAdmin.from("dd_treasure_claims").insert({
+      created_at: new Date().toISOString(),
+      username,
+      box_id: "golden",
+      dig_id,
+      chain_id: chainIdNum || null,
+      token_symbol: token,
+      token_address: token_address,
+      amount,
+      status: "CLAIMED",
+      find_tier: "GOLDEN FIND",
+      is_golden: true,
+    });
+
+    if (gErr) {
+      const msg = String((gErr as any)?.message ?? "").toLowerCase();
+      if (!msg.includes("duplicate") && !msg.includes("unique")) {
+        console.error("[golden] canonical golden claim insert failed:", gErr);
+      }
+    }
+  } catch (e) {
+    console.error("[golden] canonical golden claim unexpected:", e);
+  }
+
   const responseBody = {
     ok: true,
     golden: true,
     claim_code,
     terminal_user_id,
     tg_user_id,
-    dig_id, // ✅ NEW (debug + traceability)
+    dig_id,
     golden_slot: Number(slot?.new_count ?? 0),
     golden_cap: DAILY_CAP,
     utc_reset_in: timeLeftHMS,
@@ -382,15 +440,12 @@ async function handle(req: Request): Promise<NextResponse> {
     },
   };
 
-  // Cache success slightly longer (prevents duplicate broadcasts on rapid retries)
   setCache(responseBody, SUCCESS_CACHE_MS);
-
   return NextResponse.json(responseBody);
 }
 
 export async function POST(req: Request) {
   try {
-    // In-flight de-dupe: if multiple requests arrive at once, share one execution.
     if (_inFlight) return _inFlight;
 
     _inFlight = handle(req)

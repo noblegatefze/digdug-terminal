@@ -2886,6 +2886,7 @@ export default function Page() {
 
     // Call canonical server dig (server computes reward + writes reserve + writes claim)
     let digId = uid("dig"); // local fallback for UI record id
+    let serverDigId = "";
     let rewardAmt = 0;
     let sym = campaign.tokenSymbol ?? "TOKEN";
     let usdPrice: number | null = null;
@@ -2901,34 +2902,32 @@ export default function Page() {
           install_id: installId,
           captcha_pass_id: getCaptchaPassIdFor("DIG"),
         }),
-
       });
 
       const out = (await r.json().catch(() => null)) as any;
+
+      // ✅ capture server dig id into outer-scope var (used later by golden check)
+      serverDigId = typeof out?.dig_id === "string" ? String(out.dig_id) : "";
 
       if (!r.ok || !out?.ok) {
         const err = String(out?.error ?? `HTTP ${r.status}`);
         emit("warn", `Dig failed (${err}). No fuel spent.`);
 
-        // If server says the box is empty/insufficient, refresh campaigns so UI eligibility matches server truth.
         if (err === "insufficient_box_balance") {
           emit("sys", "Syncing box balances...");
           await refreshCampaignsFromServer();
         }
-
         return;
       }
 
-      digId = String(out.dig_id ?? digId);
+      digId = serverDigId || digId;
       rewardAmt = Number(out.reward_amount ?? 0);
       sym = String(out.token_symbol ?? sym);
       claimId = String(out?.claim_id ?? out?.claim?.id ?? "");
 
-      // optional: if server ever returns pricing later
       usdPrice = out?.reward_price_usd != null ? Number(out.reward_price_usd) : null;
-      // ✅ Apply fuel spend immediately for UX (server is still canonical)
-      applyLocalFuelSpend(campaign.costUSDDD);
 
+      applyLocalFuelSpend(campaign.costUSDDD);
     } catch (e: any) {
       emit("warn", `Dig failed (network). No fuel spent.`);
       return;
@@ -3020,6 +3019,13 @@ export default function Page() {
     const eligibleByValue = realUsd != null && realUsd >= GOLD_MIN && realUsd <= GOLD_MAX;
 
     if (eligibleByValue && canTryByTime && goldenEntropyRef.current >= goldenThresholdRef.current) {
+      // ✅ HARD GUARD: only call golden if we have the real server dig id
+      if (!serverDigId || !serverDigId.startsWith("dig_")) {
+        // Do NOT attempt golden check without canonical dig_id
+        // (prevents dd_tg_golden_events.dig_id null forever)
+        return;
+      }
+
       goldenEntropyRef.current = 0;
       goldenThresholdRef.current = 0.9 + Math.random() * 0.6;
       lastGoldenCheckAtRef.current = now;
@@ -3032,10 +3038,7 @@ export default function Page() {
           token: sym,
           chain: campaign.deployChainId,
           username: authedUser,
-
-          // ✅ NEW: send dig_id so Golden can be joined to Rewards Ledger
-          // Replace `digId` with your actual dig id variable in this scope.
-          dig_id: digId,
+          dig_id: serverDigId, // ✅ ALWAYS canonical
         }),
       })
         .then((r) => r.json().catch(() => null))
@@ -3046,7 +3049,6 @@ export default function Page() {
           }
         })
         .catch(() => { });
-
     }
 
   };
