@@ -307,6 +307,11 @@ export async function POST(req: NextRequest) {
       reward_amount,
       price_usd,
       reward_usd,
+
+      // ✅ backwards compatible aliases for older clients (Terminal golden gate)
+      reward_price_usd: price_usd,
+      reward_usd_value: reward_usd,
+
       find_tier,
       is_golden,
       reserve: out,
