@@ -44,6 +44,7 @@ type PromptMode =
   | "WITHDRAW_TREASURE_PICK"
   | "WITHDRAW_TREASURE_AMOUNT"
   | "WITHDRAW_TREASURE_ADDR"
+  | "WITHDRAW_STEPUP_PASS"
   | "ADMIN_RESET_PICK"
 
   // captcha prompts
@@ -3128,18 +3129,17 @@ export default function Page() {
   };
 
   const openWithdrawUSDDD = () => {
-    if (!require2FAEnabled()) return;
-    if (!requireWallet()) return;
+    if (!requirePass()) return;
     emit("sys", "Withdraw USDDD selected.");
     emit("info", `Available (Acquired): ${usdddAcquiredRef.current.toFixed(2)} USDDD`);
     emit("sys", `Note: Allocated (${usdddAllocatedRef.current.toFixed(2)}) is non-withdrawable.`);
+    emit("warn", "Warning: sending to exchange wallets may be risky if token isn't listed.");
     emit("info", "Enter amount to withdraw:");
     setPrompt({ mode: "WITHDRAW_USDDD_AMOUNT", withdrawKind: "USDDD" });
   };
 
   const openWithdrawTreasure = () => {
-    if (!require2FAEnabled()) return;
-    if (!requireWallet()) return;
+    if (!requirePass()) return;
 
     const groups = listTreasureGroupsForUser(authedUser);
     if (groups.length === 0) {
@@ -3153,6 +3153,7 @@ export default function Page() {
       emit("sys", `   token=${shortAddr(g.tokenAddress)} - claims=${g.claimsCount} - boxes=${g.boxesCount}`);
     });
 
+    emit("warn", "Warning: sending to exchange wallets may be risky if token isn't listed.");
     emit("info", `Reply with group number (e.g. ${C("1")}):`);
     setPrompt({ mode: "WITHDRAW_TREASURE_PICK", withdrawKind: "TREASURE" });
   };
@@ -4038,6 +4039,7 @@ export default function Page() {
   };
 
   // INPUT HANDLER
+
   const submitInput = async (raw: string) => {
     const value = raw; // do not trim yet (we allow empty ENTER for withdraw addr)
     const trimmed = normalizeInput(raw);
@@ -4401,6 +4403,106 @@ export default function Page() {
       return;
     }
 
+    // withdraw_stepup_pass
+
+    if (prompt.mode === "WITHDRAW_STEPUP_PASS") {
+      if (!requirePass()) return;
+
+      const pass = trimmed;
+      const to = String(prompt.address ?? "").trim();
+      const amt = Number(prompt.amount ?? 0);
+
+      if (!to) {
+        emit("err", "missing_to_address");
+        setPrompt({ mode: "IDLE" });
+        return;
+      }
+
+      if (!Number.isFinite(amt) || amt <= 0) {
+        emit("err", "invalid_amount");
+        setPrompt({ mode: "IDLE" });
+        return;
+      }
+
+      setPrompt({ mode: "IDLE" });
+
+      try {
+        if (prompt.withdrawKind === "USDDD") {
+          const r = await fetch("/api/terminal/withdraw/usddd", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              username: terminalPass!.username,
+              terminal_pass: pass,
+              amount: amt,
+              to_address: to,
+            }),
+          });
+
+          const j: any = await r.json().catch(() => null);
+          if (!r.ok || !j?.ok) {
+            emit("err", `Withdraw failed: ${j?.error ?? `HTTP ${r.status}`}`);
+            return;
+          }
+
+          emit("ok", "USDDD withdrawal confirmed (mock).");
+          emit("sys", `amount=${amt.toFixed(2)} - to=${shortAddr(to)}`);
+          emit("sys", `tx=${String(j.tx_hash ?? "").slice(0, 12)}...${String(j.tx_hash ?? "").slice(-8)}`);
+
+          void hydrateUserState(terminalPass!.username);
+          return;
+        }
+
+        if (prompt.withdrawKind === "TREASURE") {
+          const key = String(prompt.selectedAsset ?? "");
+
+          const r = await fetch("/api/terminal/withdraw/treasure", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              username: terminalPass!.username,
+              terminal_pass: pass,
+              group_key: key,
+              amount: amt,
+              to_address: to,
+            }),
+          });
+
+          const j: any = await r.json().catch(() => null);
+          if (!r.ok || !j?.ok) {
+            emit("err", `Withdraw failed: ${j?.error ?? `HTTP ${r.status}`}`);
+            return;
+          }
+
+          const { chainId, symbol, tokenAddress } = parseTreasureGroupKey(key);
+
+          emit("ok", "Treasure withdrawal confirmed (mock).");
+          emit("sys", `asset=${symbol} - chain=${chainLabel(chainId)} - token=${shortAddr(tokenAddress)}`);
+          emit("sys", `amount=${amt.toFixed(6)} - to=${shortAddr(to)}`);
+          emit("sys", `tx=${String(j.tx_hash ?? "").slice(0, 12)}...${String(j.tx_hash ?? "").slice(-8)}`);
+
+          // refresh claims
+          const rr = await fetch(`/api/claims/list?username=${encodeURIComponent(terminalPass!.username)}`);
+          const jj: any = await rr.json().catch(() => null);
+          if (rr.ok && jj?.ok && Array.isArray(jj?.claims)) {
+            const dbClaims = (jj.claims as any[]).map((c) => ({
+              ...c,
+              amount: Number(c.amount),
+              createdAt: Number(c.createdAt),
+              withdrawnAt: c.withdrawnAt == null ? null : Number(c.withdrawnAt),
+            }));
+            setClaims(dbClaims);
+            setTreasureBalances(recomputeTreasureBalancesForUser(terminalPass!.username, dbClaims));
+          }
+
+          return;
+        }
+      } catch (e: any) {
+        emit("err", `Withdraw failed (network): ${e?.message ?? "unknown"}`);
+        return;
+      }
+    }
+
     // econ
     if (prompt.mode === "ACQUIRE_USDDD_AMOUNT") {
       if (!requirePass()) return;
@@ -4533,9 +4635,9 @@ export default function Page() {
       const dest = trimmed.length > 0 ? trimmed : activeWallet?.address ?? "";
       if (!looksLikeAddress(dest)) return void emit("warn", "Address looks too short.");
       withdrawGasNotice(activeWallet?.chainId ?? "ETH");
-      emit("sys", `Destination: ${shortAddr(dest)} (connected wallet default)`);
-      emit("warn", "Enter 6-digit 2FA code:");
-      setPrompt({ mode: "NEED_2FA", twoFaPurpose: "STEPUP", withdrawKind: "USDDD", amount: prompt.amount, address: dest });
+      emit("sys", `Destination: ${shortAddr(dest)}`);
+      emit("warn", "Enter Terminal Pass to authorize this withdrawal:");
+      setPrompt({ mode: "WITHDRAW_STEPUP_PASS", withdrawKind: "USDDD", amount: prompt.amount, address: dest });
       return;
     }
 
@@ -4573,18 +4675,17 @@ export default function Page() {
       if (!looksLikeAddress(dest)) return void emit("warn", "Address looks too short.");
 
       withdrawGasNotice(chainId);
-      emit("sys", `Destination: ${shortAddr(dest)} (connected wallet default)`);
-      emit("warn", "Enter 6-digit 2FA code:");
-
+      emit("sys", `Destination: ${shortAddr(dest)}`);
+      emit("warn", "Enter Terminal Pass to authorize this withdrawal:");
       setPrompt({
-        mode: "NEED_2FA",
-        twoFaPurpose: "STEPUP",
+        mode: "WITHDRAW_STEPUP_PASS",
         withdrawKind: "TREASURE",
         selectedAsset: key,
         amount: prompt.amount,
         address: dest,
       });
       return;
+
     }
 
     // admin reset
