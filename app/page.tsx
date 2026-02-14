@@ -15,7 +15,7 @@ import { DISPLAY_VERSION } from "@/app/lib/build";
  * - Sponsor: set limit (max digs per user per box). set max is deprecated alias.
  * - Dig gating: per Terminal Pass (username), not per wallet.
  * - Find tiers restored (BASE/LOW/MEDIUM/HIGH/MEGA FIND)
- * - Withdraw: defaults to connected wallet, warns user pays gas, warns on chain mismatch (non-strict)
+ * - Withdraw: requires destination address + Terminal Pass confirmation (no wallet binding)
  * - Treasure claim-ledger + FIFO consumption (multi-box + multi-chain correctness)
  * - Wallet uniqueness: global across all Terminal Passes on this device
  *   - EVM uniqueness is address-only across ETH/BNB/ARB/BASE
@@ -2024,7 +2024,7 @@ export default function Page() {
   const require2FAEnabled = () => {
     if (!requirePass()) return false;
     if (twoFaEnabled) return true;
-    emit("warn", "SECURITY UNVERIFIED // 2FA REQUIRED for this action");
+    emit("info", `Security: ${G("Terminal Pass step-up for withdrawals")}`);
     emit("info", `Next: ${C("2fa")}`);
     return false;
   };
@@ -2443,7 +2443,7 @@ export default function Page() {
 
     emit("sys", `MODE: ${consoleModeRef.current} - AUTO-SCROLL: ${autoScroll ? "ON" : "OFF"}`);
     emit("info", `Terminal Pass: ${authedUser ? G(authedUser) : "NONE"}`);
-    emit("info", `Security: ${twoFaEnabled ? G("VERIFIED (2FA)") : `UNVERIFIED (type ${C("2fa")} to verify)`}`);
+    emit("info", `Security: ${G("Terminal Pass step-up for withdrawals")}`);
 
     if (!activeWallet) emit("info", `Wallet: DISCONNECTED`);
     else emit("info", `Wallet: ${G("CONNECTED")} - ${G(activeWallet.label)} - ${G(chainLabel(activeWallet.chainId))} - ${G(shortAddr(activeWallet.address))}`);
@@ -3121,7 +3121,7 @@ export default function Page() {
   const openWithdraw = () => {
     if (!requirePass()) return;
     emit("info", "Withdraw options:");
-    emit("sys", "Withdrawals send to your connected wallet by default. Network gas is paid by the user.");
+    emit("sys", "Withdrawals require a destination address + Terminal Pass confirmation. Network gas is paid by the user.");
     emit("info", `${C("1")}) USDDD (acquired only)`);
     emit("info", `${C("2")}) Treasure`);
     emit("info", `Reply with ${C("1")} or ${C("2")}:`);
@@ -3159,14 +3159,9 @@ export default function Page() {
   };
 
   const withdrawGasNotice = (assetChainId: ChainId) => {
-    const walletFam = activeWallet ? chainFamily(activeWallet.chainId) : "EVM";
-    const assetFam = chainFamily(assetChainId);
     emit("warn", "Network gas is paid by the user (external fee).");
     emit("sys", `Asset chain: ${chainLabel(assetChainId)}`);
-    if (activeWallet) emit("sys", `Destination wallet: ${chainLabel(activeWallet.chainId)} - type=${walletFam}`);
-    if (assetFam !== walletFam) {
-      emit("warn", "Chain mismatch (Phase Zero, non-strict). Ensure your destination supports the asset chain.");
-    }
+    emit("warn", "Ensure the destination address supports this chain/standard.");
   };
 
   // Sponsor flow
@@ -4626,13 +4621,14 @@ export default function Page() {
       const amt = Number(trimmed);
       if (!Number.isFinite(amt) || amt <= 0) return void emit("warn", "Enter a valid amount.");
       if (amt > usdddAcquiredRef.current) return void emit("err", "Amount exceeds acquired balance.");
-      emit("info", "Enter destination address (press ENTER to use connected wallet):");
+      emit("info", "Enter destination address:");
       setPrompt({ mode: "WITHDRAW_USDDD_ADDR", withdrawKind: "USDDD", amount: amt });
       return;
     }
 
     if (prompt.mode === "WITHDRAW_USDDD_ADDR") {
-      const dest = trimmed.length > 0 ? trimmed : activeWallet?.address ?? "";
+      const dest = trimmed;
+      if (!dest) return void emit("warn", "Destination address required.");
       if (!looksLikeAddress(dest)) return void emit("warn", "Address looks too short.");
       withdrawGasNotice(activeWallet?.chainId ?? "ETH");
       emit("sys", `Destination: ${shortAddr(dest)}`);
@@ -4662,7 +4658,7 @@ export default function Page() {
       const EPS = 1e-6; // 0.000001 tokens tolerance
       if (amt - max > EPS) return void emit("err", "Amount exceeds available.");
 
-      emit("info", "Enter destination address (press ENTER to use connected wallet):");
+      emit("info", "Enter destination address:");
       setPrompt({ mode: "WITHDRAW_TREASURE_ADDR", withdrawKind: "TREASURE", selectedAsset: key, amount: amt });
       return;
     }
@@ -4671,7 +4667,8 @@ export default function Page() {
       const key = prompt.selectedAsset ?? "";
       const { chainId } = parseTreasureGroupKey(key);
 
-      const dest = trimmed.length > 0 ? trimmed : activeWallet?.address ?? "";
+      const dest = trimmed;
+      if (!dest) return void emit("warn", "Destination address required.");
       if (!looksLikeAddress(dest)) return void emit("warn", "Address looks too short.");
 
       withdrawGasNotice(chainId);
