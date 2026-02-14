@@ -3841,6 +3841,77 @@ export default function Page() {
       return;
     }
 
+    // simulate
+    if (low === "simulate") {
+      if (!requirePass()) return;
+
+      emit("warn", "MOCK DEPOSIT SIMULATION (USDT BEP-20)");
+      emit("sys", "Simulating a USDT deposit into your Terminal deposit address...");
+      emit("sys", "This will credit Acquired USDDD (cap 1000).");
+
+      const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+      const bar = (pct: number) => {
+        const blocks = 10;
+        const filled = Math.max(0, Math.min(blocks, Math.round((pct / 100) * blocks)));
+        const empty = blocks - filled;
+        return `[${"#".repeat(filled)}${"-".repeat(empty)}] ${pct}%`;
+      };
+
+      void (async () => {
+        try {
+          const steps = [
+            { label: "deposit: preparing-", pct: 20, ms: 700 },
+            { label: "deposit: generating receipt-", pct: 55, ms: 900 },
+            { label: "deposit: confirming-", pct: 85, ms: 900 },
+            { label: "deposit: crediting acquired USDDD-", pct: 100, ms: 600 },
+          ];
+
+          for (const s of steps) {
+            emit("sys", s.label);
+            emit("sys", bar(s.pct));
+            await sleep(s.ms);
+          }
+
+          const r = await fetch("/api/terminal/deposit/simulate", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ username: terminalPass!.username }),
+          });
+
+          const j: any = await r.json().catch(() => null);
+
+          if (!r.ok || !j?.ok) {
+            const err = j?.error ?? `HTTP ${r.status}`;
+            emit("err", `Simulate failed: ${err}`);
+            if (String(err).includes("cap_reached")) {
+              emit("sys", "Acquired cap reached (1000). No further credit possible.");
+            }
+            return;
+          }
+
+          const credited = Number(j.credited_usddd ?? 0);
+          const usdt = Number(j.usdt_amount ?? 0);
+          const tx = String(j.tx_hash ?? "");
+          const newAcq = Number(j.new_acquired ?? usdddAcquiredRef.current);
+          const newTot = Number(j.new_acquired_total ?? 0);
+
+          if (Number.isFinite(newAcq)) setUsdddAcquired(newAcq);
+
+          emit("ok", `Deposit received (mock): +${usdt.toFixed(2)} USDT`);
+          emit("ok", `Acquired credited: +${credited.toFixed(2)} USDDD`);
+          emit("sys", `Acquired total: ${newTot.toFixed(2)} / ${ACQUIRE_CAP}`);
+          emit("sys", `tx=${tx.slice(0, 12)}...${tx.slice(-8)}`);
+
+          // optional: sync full state once (safe, single call)
+          void hydrateUserState(terminalPass!.username);
+        } catch (e: any) {
+          emit("err", `Simulate failed (network): ${e?.message ?? "unknown"}`);
+        }
+      })();
+
+      return;
+    }
+
     // user dig
     if (low === "dig") return void startDig();
     if (low === "dig history") return void showDigHistory();
