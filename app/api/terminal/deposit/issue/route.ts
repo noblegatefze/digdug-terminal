@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { randomBytes, createHash, createCipheriv } from "crypto";
-import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
+import { Wallet } from "ethers";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 function env(name: string): string {
   const v = process.env[name];
@@ -10,7 +14,7 @@ function env(name: string): string {
 }
 
 // AES-256-GCM encrypt using TERMINAL_KEY_ENC_SECRET (server-only)
-function encryptPrivKeyHex(privKeyHex: `0x${string}`, secret: string): string {
+function encryptPrivKeyHex(privKeyHex: string, secret: string): string {
   const key = createHash("sha256").update(secret, "utf8").digest(); // 32 bytes
   const iv = randomBytes(12); // GCM recommended 12 bytes
   const cipher = createCipheriv("aes-256-gcm", key, iv);
@@ -73,10 +77,10 @@ export async function POST(req: Request) {
       });
     }
 
-    // Issue new dedicated EOA (Terminal-only)
-    const priv = generatePrivateKey();
-    const acct = privateKeyToAccount(priv);
-    const depositAddress = acct.address.toLowerCase();
+    // Issue new dedicated EOA (Terminal-only) via ethers
+    const wallet = Wallet.createRandom();
+    const priv = wallet.privateKey; // 0x...
+    const depositAddress = wallet.address.toLowerCase();
 
     const encSecret = env("TERMINAL_KEY_ENC_SECRET");
     const enc = encryptPrivKeyHex(priv, encSecret);
@@ -109,9 +113,6 @@ export async function POST(req: Request) {
       },
     });
   } catch (e: any) {
-    return NextResponse.json(
-      { ok: false, error: e?.message ?? "issue_failed" },
-      { status: 400 }
-    );
+    return NextResponse.json({ ok: false, error: e?.message ?? "issue_failed" }, { status: 400 });
   }
 }
