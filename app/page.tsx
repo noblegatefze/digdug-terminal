@@ -3805,8 +3805,39 @@ export default function Page() {
     if (low === "allocate" || low === "allocate usddd" || low === "claim usddd" || low === "claim") return void doAllocate();
     if (low === "acquire" || low === "acquire usddd" || low === "buy" || low === "buy usddd") {
       if (!requirePass()) return;
-      emit("info", "Enter amount to acquire (USDDD):");
-      setPrompt({ mode: "ACQUIRE_USDDD_AMOUNT" });
+
+      emit("sys", "Issuing your Terminal deposit address (BEP-20)...");
+      setPrompt({ mode: "IDLE" });
+
+      void (async () => {
+        try {
+          const r = await fetch("/api/terminal/deposit/issue", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ username: terminalPass!.username }),
+          });
+
+          const j: any = await r.json().catch(() => null);
+
+          if (!r.ok || !j?.ok) {
+            emit("err", `Acquire setup failed: ${j?.error ?? `HTTP ${r.status}`}`);
+            return;
+          }
+
+          const w = j.wallet;
+          emit("ok", "Terminal deposit address ready ✅");
+          emit("info", "Send USDT (BEP-20) to this address in Genesis to credit Acquired USDDD:");
+          emit("sys", `Chain: ${w.chain?.toUpperCase?.() ?? "BSC"} (BEP-20)`);
+          emit("sys", `Address: ${w.deposit_address}`);
+          emit("sys", "");
+          emit("info", "MOCK MODE:");
+          emit("sys", "Nothing is actually deposited yet. Next step will add:");
+          emit("sys", "Type: " + C("simulate") + "  (we will implement this next)");
+        } catch (e: any) {
+          emit("err", `Acquire setup failed (network): ${e?.message ?? "unknown"}`);
+        }
+      })();
+
       return;
     }
 
