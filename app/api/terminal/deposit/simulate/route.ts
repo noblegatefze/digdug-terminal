@@ -49,6 +49,42 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "deposit_wallet_missing" }, { status: 400 });
     }
 
+    // ------------------------------------------------------------
+    // Dynamic acquire cap (mock): 1000 + 1000 per 500 FINDS (claims)
+    // - computed from dd_treasure_claims.user_id (successful digs)
+    // - safe fallback to 1000 if anything fails
+    // ------------------------------------------------------------
+    let cap_usddd = 1000;
+
+    try {
+      const { data: u, error: uErr } = await sb
+        .from("dd_terminal_users")
+        .select("id")
+        .eq("username", username)
+        .maybeSingle();
+
+      if (!uErr && u?.id) {
+        const { data: cap, error: capErr } = await sb.rpc("rpc_user_acquire_cap", {
+          p_user_id: u.id,
+        });
+
+        // Supabase RPC scalar returns can vary depending on client/version;
+        // handle number directly or wrapped shapes.
+        const capNum =
+          typeof cap === "number"
+            ? cap
+            : (cap as any)?.cap_usddd ??
+              (cap as any)?.rpc_user_acquire_cap ??
+              (Array.isArray(cap) ? (cap as any[])[0] : null);
+
+        if (!capErr && Number.isFinite(Number(capNum))) {
+          cap_usddd = Math.max(1000, Math.floor(Number(capNum)));
+        }
+      }
+    } catch {
+      // ignore; keep default
+    }
+
     const usdt = randAmount(25, 250);
     const tx = `0x${randomBytes(32).toString("hex")}`;
 
@@ -61,12 +97,13 @@ export async function POST(req: Request) {
 
     if (error) {
       const msg = String((error as any)?.message ?? "rpc_failed");
-      return NextResponse.json({ ok: false, error: msg }, { status: 400 });
+      return NextResponse.json({ ok: false, error: msg, cap_usddd }, { status: 400 });
     }
 
     return NextResponse.json({
       ok: true,
       tx_hash: tx,
+      cap_usddd,
       ...data,
     });
   } catch (e: any) {
