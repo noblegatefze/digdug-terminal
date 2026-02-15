@@ -1260,6 +1260,7 @@ export default function Page() {
   const [usdddAllocated, setUsdddAllocated] = useState(10);
   const [usdddAcquired, setUsdddAcquired] = useState(0);
   const [acquiredTotal, setAcquiredTotal] = useState(0);
+  const [acquireCap, setAcquireCap] = useState(ACQUIRE_CAP); // UI-only (server is truth)
 
   const usdddTotal = usdddAllocated + usdddAcquired;
 
@@ -2449,6 +2450,7 @@ export default function Page() {
     else emit("info", `Wallet: ${G("CONNECTED")} - ${G(activeWallet.label)} - ${G(chainLabel(activeWallet.chainId))} - ${G(shortAddr(activeWallet.address))}`);
 
     emit("info", `USDDD: allocated=${GNum(usdddAllocatedRef.current, 2)} - acquired=${GNum(usdddAcquiredRef.current, 2)} - total=${GNum(usdddTotalRef.current, 2)}`);
+    emit("info", `Acquire cap (mock): ${G(String(Math.floor(acquireCap)))} USDDD  (scales +1000 per 500 finds)`);
     emit("info", `Fuel Used: ${GNum(treasuryRef.current, 2)}`);
 
     emit("info", `Daily allocation: +${DAILY_ALLOCATION}/24h - cap ${BASE_CAP} - ${capHit ? "CAP REACHED" : ready ? G("AVAILABLE") : `in ${fmtMs(remaining)}`}`);
@@ -3843,7 +3845,7 @@ export default function Page() {
 
       emit("warn", "MOCK DEPOSIT SIMULATION (USDT BEP-20)");
       emit("sys", "Simulating a USDT deposit into your Terminal deposit address...");
-      emit("sys", "This will credit Acquired USDDD (cap 1000).");
+      emit("sys", `This will credit Acquired USDDD (cap is dynamic by Finds).`);
 
       const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
       const bar = (pct: number) => {
@@ -3890,12 +3892,14 @@ export default function Page() {
           const tx = String(j.tx_hash ?? "");
           const newAcq = Number(j.new_acquired ?? usdddAcquiredRef.current);
           const newTot = Number(j.new_acquired_total ?? 0);
+          const cap = Number(j.cap_usddd ?? j.acquire_cap ?? ACQUIRE_CAP);
+          if (Number.isFinite(cap) && cap > 0) setAcquireCap(cap);
 
           if (Number.isFinite(newAcq)) setUsdddAcquired(newAcq);
 
           emit("ok", `Deposit received (mock): +${usdt.toFixed(2)} USDT`);
           emit("ok", `Acquired credited: +${credited.toFixed(2)} USDDD`);
-          emit("sys", `Acquired total: ${newTot.toFixed(2)} / ${ACQUIRE_CAP}`);
+          emit("sys", `Acquired total: ${newTot.toFixed(2)} / ${(Number.isFinite(cap) && cap > 0 ? cap : acquireCap).toFixed(0)}`);
           emit("sys", `tx=${tx.slice(0, 12)}...${tx.slice(-8)}`);
 
           // optional: sync full state once (safe, single call)
