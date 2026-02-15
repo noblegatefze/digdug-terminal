@@ -19,24 +19,20 @@ const GOLD_MIN = 5;
 const GOLD_MAX = 20;
 const DAILY_CAP = 5;
 
-// Hard floor so it can’t rapid-fire even if lots of users dig
-const MIN_GAP_FLOOR_SECONDS = 2 * 60 * 60; // 2 hours
-const GAP_JITTER_MAX_SECONDS = 60 * 60; // +0–60 min unpredictability (server-side)
+// Window config (locked defaults)
+const WINDOW_MINUTES = 6;
+const WINDOWS_PER_DAY = 5;
 
 // ------------------------------------------------------------
-// Emergency anti-storm patch (server-side only)
+// Anti-storm (server-side only)
 // ------------------------------------------------------------
-const GLOBAL_MIN_CALL_MS = 30_000; // never attempt golden slot more often than every 30s per instance
-const IDENTITY_COOLDOWN_MS = 20_000; // per-user/install/ip cooldown window
-const SUCCESS_CACHE_MS = 30_000; // cache positive golden result briefly
-const NEGATIVE_CACHE_MS = 30_000; // cache negative results briefly
+const GLOBAL_MIN_CALL_MS = 10_000; // hard throttle per instance
+const IDENTITY_COOLDOWN_MS = 15_000; // per identity cooldown
+const NEGATIVE_CACHE_MS = 20_000; // per identity short cache for negatives
 
 type Cached = { at: number; body: any; ttl: number };
 
-// Global cache (single response cache)
-let _cache: Cached | null = null;
-
-// In-flight de-dupe (avoid 50 concurrent requests all hitting DB)
+// In-flight de-dupe
 let _inFlight: Promise<NextResponse> | null = null;
 
 // Global last-call timestamp (hard throttle)
@@ -44,6 +40,7 @@ let _lastAttemptAt = 0;
 
 // Per-identity cooldowns
 const _cooldowns = new Map<string, number>();
+const _negCache = new Map<string, Cached>();
 
 function nowMs() {
   return Date.now();
@@ -62,25 +59,31 @@ function cooldownKey(parts: { username?: string; install_id?: string; ip?: strin
   return "k:unknown";
 }
 
-function shouldServeCache(): Cached | null {
-  if (!_cache) return null;
-  const age = nowMs() - _cache.at;
-  if (age <= _cache.ttl) return _cache;
+function shouldServeNegCache(key: string): Cached | null {
+  const c = _negCache.get(key) ?? null;
+  if (!c) return null;
+  const age = nowMs() - c.at;
+  if (age <= c.ttl) return c;
+  _negCache.delete(key);
   return null;
 }
 
-function setCache(body: any, ttl: number) {
-  _cache = { at: nowMs(), body, ttl };
+function setNegCache(key: string, body: any, ttl: number) {
+  _negCache.set(key, { at: nowMs(), body, ttl });
 }
 
 function todayUTCDateString(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function genClaimCode() {
+function genClaimCodeDeterministic(seed: Buffer, counter: number) {
+  // Deterministic-ish claim code generation to reduce collisions (still random-looking)
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const h = crypto.createHash("sha256").update(seed).update(String(counter)).digest();
   let out = "GF-";
-  for (let i = 0; i < 4; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  for (let i = 0; i < 4; i++) {
+    out += chars[h[i] % chars.length];
+  }
   return out;
 }
 
@@ -142,6 +145,93 @@ function asNum(v: any, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+// ---------------------------
+// Deterministic daily windows
+// ---------------------------
+function prngFromSeed(seed: Buffer) {
+  // xorshift32 from first 4 bytes
+  let x = seed.readUInt32LE(0) ^ 0x9e3779b9;
+  return () => {
+    x ^= x << 13;
+    x ^= x >>> 17;
+    x ^= x << 5;
+    // 0..1
+    return (x >>> 0) / 0xffffffff;
+  };
+}
+
+function computeWindowsForDay(dayStr: string, secret: string) {
+  // 5 windows/day, each WINDOW_MINUTES
+  // Choose open minute offsets across the day with spacing.
+  const seed = crypto.createHmac("sha256", secret).update(dayStr).digest();
+  const rnd = prngFromSeed(seed);
+
+  const dayStart = new Date(`${dayStr}T00:00:00.000Z`).getTime();
+
+  const minOpen = 30; // don't start at exactly midnight
+  const maxOpen = 24 * 60 - WINDOW_MINUTES - 30;
+  const minGap = 120; // minimum 2 hours spacing between windows
+
+  const picks: number[] = [];
+  let guard = 0;
+
+  while (picks.length < WINDOWS_PER_DAY && guard++ < 10_000) {
+    const candidate = Math.floor(minOpen + rnd() * (maxOpen - minOpen));
+
+    // spacing check
+    let ok = true;
+    for (const p of picks) {
+      if (Math.abs(p - candidate) < minGap) {
+        ok = false;
+        break;
+      }
+    }
+    if (!ok) continue;
+
+    picks.push(candidate);
+  }
+
+  picks.sort((a, b) => a - b);
+
+  const rows = picks.slice(0, WINDOWS_PER_DAY).map((minuteOffset, i) => {
+    const opensAtMs = dayStart + minuteOffset * 60_000;
+    const closesAtMs = opensAtMs + WINDOW_MINUTES * 60_000;
+    return {
+      day: dayStr,
+      slot: i + 1,
+      opens_at: new Date(opensAtMs).toISOString(),
+      closes_at: new Date(closesAtMs).toISOString(),
+      claimed_event_id: null as any,
+    };
+  });
+
+  return { seed, rows };
+}
+
+async function ensureWindowsExist(dayStr: string) {
+  const secret = process.env.DD_GOLDEN_WINDOWS_SECRET;
+  if (!secret || secret.length < 16) throw new Error("Missing/weak env: DD_GOLDEN_WINDOWS_SECRET");
+
+  // If any rows exist for today, do nothing (don’t reshuffle live day)
+  const { data: existing, error: exErr } = await supabaseAdmin
+    .from("dd_tg_golden_windows")
+    .select("day,slot")
+    .eq("day", dayStr)
+    .limit(1);
+
+  if (exErr) throw exErr;
+  if (existing && existing.length > 0) return;
+
+  const { rows } = computeWindowsForDay(dayStr, secret);
+
+  // Upsert 5 rows
+  const { error: upErr } = await supabaseAdmin
+    .from("dd_tg_golden_windows")
+    .upsert(rows, { onConflict: "day,slot" });
+
+  if (upErr) throw upErr;
+}
+
 async function handle(req: Request): Promise<NextResponse> {
   const ADMIN_KEY = process.env.ADMIN_API_KEY;
   if (!ADMIN_KEY) {
@@ -155,101 +245,63 @@ async function handle(req: Request): Promise<NextResponse> {
   const token = String(body.token ?? "").trim();
   const chain = String(body.chain ?? "").trim();
   const username = String(body.username ?? "").trim();
-
   const install_id = String(body.install_id ?? "").trim();
 
-  // ✅ REQUIRED now: dig_id must be present and must be the REAL server dig_id (not the early fallback id)
-  // Reason: we want dd_tg_golden_events always linkable to canonical claims/spend.
+  // ✅ REQUIRED: dig_id must be canonical server dig_id
   let dig_id: string | null = String(body.dig_id ?? body.digId ?? "").trim();
   if (!dig_id) dig_id = null;
 
-  // Fast reject: out of reward range
+  // Fast reject: out of reward range / missing fields
   if (!Number.isFinite(usdValue) || usdValue < GOLD_MIN || usdValue > GOLD_MAX) {
-    const out = { ok: true, golden: false, reason: "out_of_range" };
-    setCache(out, NEGATIVE_CACHE_MS);
-    return NextResponse.json(out);
+    return NextResponse.json({ ok: true, golden: false, reason: "out_of_range" });
   }
-  if (!token || !chain) {
-    const out = { ok: true, golden: false, reason: "missing_token_or_chain" };
-    setCache(out, NEGATIVE_CACHE_MS);
-    return NextResponse.json(out);
-  }
-  if (!username) {
-    const out = { ok: true, golden: false, reason: "missing_username" };
-    setCache(out, NEGATIVE_CACHE_MS);
-    return NextResponse.json(out);
-  }
+  if (!token || !chain) return NextResponse.json({ ok: true, golden: false, reason: "missing_token_or_chain" });
+  if (!username) return NextResponse.json({ ok: true, golden: false, reason: "missing_username" });
+  if (!dig_id) return NextResponse.json({ ok: true, golden: false, reason: "missing_dig_id" });
 
-  // ✅ NEW HARD GUARD
-  if (!dig_id) {
-    const out = { ok: true, golden: false, reason: "missing_dig_id" };
-    setCache(out, NEGATIVE_CACHE_MS);
-    return NextResponse.json(out);
-  }
-
-  // ------------------------------------------------------------
-  // Anti-storm checks BEFORE calling Supabase
-  // ------------------------------------------------------------
-
-  const cached = shouldServeCache();
-  if (cached) return NextResponse.json(cached.body);
-
+  // ------------------------
+  // Anti-storm before DB
+  // ------------------------
   const n = nowMs();
+  const ip = getIp(req);
+  const idKey = cooldownKey({ username, install_id, ip });
+
+  const cachedNeg = shouldServeNegCache(idKey);
+  if (cachedNeg) return NextResponse.json(cachedNeg.body);
+
   if (n - _lastAttemptAt < GLOBAL_MIN_CALL_MS) {
     const out = { ok: true, golden: false, reason: "server_throttled" };
-    setCache(out, NEGATIVE_CACHE_MS);
+    setNegCache(idKey, out, NEGATIVE_CACHE_MS);
     return NextResponse.json(out);
   }
 
-  const ip = getIp(req);
-  const key = cooldownKey({ username, install_id, ip });
-  const until = _cooldowns.get(key) ?? 0;
+  const until = _cooldowns.get(idKey) ?? 0;
   if (n < until) {
     const out = { ok: true, golden: false, reason: "cooldown" };
-    setCache(out, NEGATIVE_CACHE_MS);
+    setNegCache(idKey, out, NEGATIVE_CACHE_MS);
     return NextResponse.json(out);
   }
 
-  _cooldowns.set(key, n + IDENTITY_COOLDOWN_MS);
+  _cooldowns.set(idKey, n + IDENTITY_COOLDOWN_MS);
+  _lastAttemptAt = n;
 
+  // keep map bounded
   if (_cooldowns.size > 50_000) {
     const cutoff = n - 5 * 60_000;
-    for (const [k, t] of _cooldowns) {
-      if (t < cutoff) _cooldowns.delete(k);
-    }
+    for (const [k, t] of _cooldowns) if (t < cutoff) _cooldowns.delete(k);
   }
-
-  _lastAttemptAt = n;
 
   const dayStr = todayUTCDateString();
 
-  // Dynamic pacing
-  const msLeft = msUntilNextUtcReset(new Date());
-  const baselineGap = Math.floor(msLeft / 1000 / DAILY_CAP * 0.6);
-  const jitterExtraSeconds = crypto.randomInt(0, GAP_JITTER_MAX_SECONDS + 1);
-  const minGapSeconds = Math.max(MIN_GAP_FLOOR_SECONDS, baselineGap) + jitterExtraSeconds;
-
-  // 1) Atomically take a paced daily slot
-  type GoldenSlot = { allowed: boolean; new_count: number; next_allowed_at: string | null };
-
-  const { data: slot, error: slotErr } = await supabaseAdmin
-    .rpc("dd_take_golden_slot", { p_day: dayStr, p_cap: DAILY_CAP, p_min_gap_seconds: minGapSeconds })
-    .single<GoldenSlot>();
-
-  if (slotErr) {
-    console.error("[golden] slot rpc failed:", slotErr);
-    const out = { ok: false, error: "slot_rpc_failed", detail: slotErr.message };
-    setCache(out, NEGATIVE_CACHE_MS);
-    return NextResponse.json(out, { status: 500 });
+  // Ensure windows exist for today (one-time per day)
+  try {
+    await ensureWindowsExist(dayStr);
+  } catch (e: any) {
+    console.error("[golden] ensureWindowsExist failed:", e);
+    return NextResponse.json({ ok: false, error: "windows_seed_failed" }, { status: 500 });
   }
 
-  if (!slot?.allowed) {
-    const out = { ok: true, golden: false, reason: "paced_or_capped" };
-    setCache(out, NEGATIVE_CACHE_MS);
-    return NextResponse.json(out);
-  }
-
-  // 2) Resolve terminal user
+  // Resolve terminal user
   const { data: users, error: uErr } = await supabaseAdmin
     .from("dd_terminal_users")
     .select("id")
@@ -258,7 +310,7 @@ async function handle(req: Request): Promise<NextResponse> {
 
   if (uErr || !users?.[0]?.id) {
     const out = { ok: true, golden: false, reason: "terminal_user_not_found" };
-    setCache(out, NEGATIVE_CACHE_MS);
+    setNegCache(idKey, out, NEGATIVE_CACHE_MS);
     return NextResponse.json(out);
   }
 
@@ -275,51 +327,61 @@ async function handle(req: Request): Promise<NextResponse> {
 
   const tg_user_id = (linkRows?.[0] as any)?.tg_user_id ?? null;
 
-  // 3) Insert TG event (broadcasted_at set only after successful send)
-  let claim_code = genClaimCode();
-  let golden_event_id: string | null = null;
+  // Attempt award (atomic window claim + event insert)
+  type AwardRow = { ok: boolean; golden: boolean; slot: number | null; claim_code: string | null; golden_event_id: string | null };
 
-  for (let i = 0; i < 4; i++) {
-    const { data: inserted, error: insErr } = await supabaseAdmin
-      .from("dd_tg_golden_events")
-      .insert({
-        day: dayStr,
-        claim_code,
-        terminal_user_id,
-        terminal_username: username,
-        tg_user_id,
-        token,
-        chain,
-        usd_value: usdValue,
-        dig_id, // ✅ REQUIRED + ALWAYS STORED
-        broadcasted_at: null,
-      })
-      .select("id")
-      .limit(1);
+  const nowIso = new Date().toISOString();
 
-    if (!insErr) {
-      golden_event_id = (inserted?.[0] as any)?.id ?? null;
-      break;
-    }
+  const { data: award, error: aErr } = await supabaseAdmin
+    .rpc("dd_golden_try_award", {
+      p_day: dayStr,        // Postgres will coerce to date
+      p_now: nowIso,        // timestamptz
+      p_terminal_user_id: terminal_user_id,
+      p_terminal_username: username,
+      p_tg_user_id: tg_user_id,
+      p_token: token,
+      p_chain: chain,
+      p_usd_value: usdValue,
+      p_dig_id: dig_id,
+    })
+    .single<AwardRow>();
 
-    const msg = String((insErr as any)?.message ?? "").toLowerCase();
-    if (msg.includes("duplicate")) {
-      claim_code = genClaimCode();
-      continue;
-    }
-
-    console.error("[golden] insert event failed:", insErr);
-    return NextResponse.json({ ok: false, error: "golden_event_insert_failed" }, { status: 500 });
+  if (aErr) {
+    console.error("[golden] dd_golden_try_award failed:", aErr);
+    return NextResponse.json({ ok: false, error: "award_rpc_failed", detail: aErr.message }, { status: 500 });
   }
 
-  // 4) Broadcast message
+  if (!award?.ok || !award.golden) {
+    const out = { ok: true, golden: false, reason: "no_open_window" };
+    setNegCache(idKey, out, NEGATIVE_CACHE_MS);
+    return NextResponse.json(out);
+  }
+
+  const claim_code = String(award.claim_code ?? "").trim();
+  const golden_event_id = String(award.golden_event_id ?? "").trim();
+  const msLeft = msUntilNextUtcReset(new Date());
   const timeLeftHMS = formatHMS(msLeft);
+
+  // Compute "Golden Find X/5" as number of claimed windows today (only on win; max 5/day)
+  let claimedCount = 1;
+  try {
+    const { count } = await supabaseAdmin
+      .from("dd_tg_golden_windows")
+      .select("*", { count: "exact", head: true })
+      .eq("day", dayStr)
+      .not("claimed_event_id", "is", null);
+    if (typeof count === "number" && count > 0) claimedCount = count;
+  } catch {
+    // ignore; fallback stays 1
+  }
+
+  // Broadcast message
   const message = buildMessage({
     token,
     chain,
     usd: usdValue,
     claim: claim_code,
-    slotNumber: Number(slot?.new_count ?? 0),
+    slotNumber: claimedCount,
     slotCap: DAILY_CAP,
     timeLeftHMS,
   });
@@ -349,23 +411,12 @@ async function handle(req: Request): Promise<NextResponse> {
   }
 
   // ------------------------------------------------------------
-  // ✅ NEW: Canonical Golden Claim (ledger-first)
-  //
-  // Insert a *separate* claim row:
-  // - box_id = 'golden' so we don't violate UNIQUE (box_id, dig_id)
-  // - dig_id = same dig
-  // - is_golden = true
-  // - find_tier = 'GOLDEN FIND'
-  //
-  // Compute amount from usd_value / price_usd_at_claim using snapshots.
-  // Best effort; if price is missing, insert amount=0 (still keeps canonical trail).
+  // Canonical Golden Claim (ledger-first) (kept as your current best-effort)
   // ------------------------------------------------------------
-
   try {
     const chainIdNum = asNum(chain, 0);
     let token_address: string | null = null;
 
-    // Try resolve token_address via dd_boxes (symbol + chain)
     const { data: boxRow, error: boxErr } = await supabaseAdmin
       .from("dd_boxes")
       .select("token_address")
@@ -379,7 +430,6 @@ async function handle(req: Request): Promise<NextResponse> {
       token_address = addr || null;
     }
 
-    // Snapshot price <= now
     let price_usd = 0;
     if (token_address) {
       const { data: pxRow, error: pxErr } = await supabaseAdmin
@@ -397,7 +447,6 @@ async function handle(req: Request): Promise<NextResponse> {
 
     const amount = price_usd > 0 ? usdValue / price_usd : 0;
 
-    // Insert golden claim row (idempotent by UNIQUE(box_id='golden', dig_id))
     const { error: gErr } = await supabaseAdmin.from("dd_treasure_claims").insert({
       created_at: new Date().toISOString(),
       username,
@@ -429,18 +478,18 @@ async function handle(req: Request): Promise<NextResponse> {
     terminal_user_id,
     tg_user_id,
     dig_id,
-    golden_slot: Number(slot?.new_count ?? 0),
+    golden_slot: claimedCount,
     golden_cap: DAILY_CAP,
     utc_reset_in: timeLeftHMS,
     broadcast_sent,
     broadcast_message: broadcast_sent ? message : null,
     broadcast: outBr,
-    pacing: {
-      min_gap_seconds: minGapSeconds,
+    window: {
+      slot: award.slot,
+      minutes: WINDOW_MINUTES,
     },
   };
 
-  setCache(responseBody, SUCCESS_CACHE_MS);
   return NextResponse.json(responseBody);
 }
 
@@ -451,7 +500,10 @@ export async function POST(req: Request) {
     _inFlight = handle(req)
       .catch((e: any) => {
         console.error("[golden] unexpected:", e);
-        return NextResponse.json({ ok: false, error: "unexpected", detail: String(e?.message ?? e) }, { status: 500 });
+        return NextResponse.json(
+          { ok: false, error: "unexpected", detail: String(e?.message ?? e) },
+          { status: 500 }
+        );
       })
       .finally(() => {
         _inFlight = null;
@@ -460,6 +512,9 @@ export async function POST(req: Request) {
     return _inFlight;
   } catch (e: any) {
     console.error("[golden] unexpected outer:", e);
-    return NextResponse.json({ ok: false, error: "unexpected", detail: String(e?.message ?? e) }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: "unexpected", detail: String(e?.message ?? e) },
+      { status: 500 }
+    );
   }
 }
