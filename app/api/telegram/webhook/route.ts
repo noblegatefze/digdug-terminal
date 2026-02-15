@@ -855,13 +855,17 @@ async function handleUpdate(update: any) {
     const tgUserId2 = u2?.id;
     const who2 = displayName(update);
     const isGroup2 = chat?.type === "group" || chat?.type === "supergroup";
+    const fromUsername2 = String(u2?.username ?? "").trim().toLowerCase();
+    const isRelayBot =
+      fromUsername2 === "goldenrelaybot" ||
+      fromUsername2 === "@goldenrelaybot"; // just in case
 
     if (!isGroup2) {
       await sendMessage(chatId, "Usage: /paid GF-XXXX 0xTXHASH (group only)");
       return;
     }
 
-    if (!tgUserId2 || !isAdminUser(Number(tgUserId2))) {
+    if (!tgUserId2 || (!isAdminUser(Number(tgUserId2)) && !isRelayBot)) {
       await sendMessage(chatId, `❌ ${who2}: unauthorized.`);
       return;
     }
