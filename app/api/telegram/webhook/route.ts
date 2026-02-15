@@ -626,9 +626,30 @@ async function processJoin(groupChatId: number, user: any, source: "chat_member"
   const tgUserId = Number(user?.id);
   if (!tgUserId) return;
 
-  // Auto-ban bots
+  // Auto-ban bots (allowlist exceptions)
   if (user?.is_bot) {
-    await banMember(groupChatId, tgUserId, "bot_join");
+    const uname = String(user?.username ?? "").trim().toLowerCase();
+
+    // ✅ allowlisted bots (usernames without "@", lowercase)
+    const ALLOW_BOT_USERNAMES = new Set([
+      "goldenrelaybot",
+      // add others here if needed
+    ]);
+
+    // Optional: allow by numeric id (stronger). Add env if you want.
+    const allowIdRaw = (process.env.TG_ALLOW_BOT_IDS ?? "").trim(); // e.g. "12345,67890"
+    const allowIds = new Set(
+      allowIdRaw
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    );
+
+    const allowed = (uname && ALLOW_BOT_USERNAMES.has(uname)) || allowIds.has(String(tgUserId));
+
+    if (!allowed) {
+      await banMember(groupChatId, tgUserId, "bot_join");
+    }
     return;
   }
 
