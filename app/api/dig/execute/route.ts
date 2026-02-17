@@ -265,7 +265,36 @@ export async function POST(req: NextRequest) {
       // Best effort only
     }
 
-    const is_golden = false;
+    let is_golden = false;
+    let golden_claim_code: string | null = null;
+
+    try {
+      if (reward_usd !== null) {
+        const dayUtc = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+
+        const { data: gdata, error: gerr } = await sb.rpc("dd_golden_try_award", {
+          p_day: dayUtc,
+          p_now: new Date().toISOString(),
+          p_terminal_user_id: user.id,
+          p_terminal_username: user.username,
+          p_tg_user_id: null, // you can wire this later if you map TG
+          p_token: token_symbol,
+          p_chain: chain_id,
+          p_usd_value: reward_usd,
+          p_dig_id: dig_id,
+        });
+
+        if (!gerr && Array.isArray(gdata) && gdata.length > 0) {
+          const g = gdata[0];
+          if (g?.golden === true) {
+            is_golden = true;
+            golden_claim_code = g.claim_code ?? null;
+          }
+        }
+      }
+    } catch {
+      // Golden is best-effort only. Never break dig.
+    }
 
     // 8) Insert claim after reserve (RETURN inserted row)
     const { data: claimRow, error: cerr } = await sb
@@ -307,6 +336,8 @@ export async function POST(req: NextRequest) {
       reward_amount,
       price_usd,
       reward_usd,
+      is_golden,
+      golden_claim_code,
 
       // ✅ backwards compatible aliases for older clients (Terminal golden gate)
       reward_price_usd: price_usd,
