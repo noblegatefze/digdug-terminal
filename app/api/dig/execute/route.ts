@@ -236,7 +236,7 @@ export async function POST(req: NextRequest) {
       p_username: username,
       p_box_id: box_id,
       p_dig_id: dig_id,
-      p_amount: reward_amount,
+      p_amount: cost,
       p_cmc_id: null,
       p_price_usd_at_dig: null,
       p_price_at: new Date().toISOString(),
