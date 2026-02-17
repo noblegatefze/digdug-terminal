@@ -344,7 +344,6 @@ export async function POST(req: NextRequest) {
       reward_usd_value: reward_usd,
 
       find_tier,
-      is_golden,
       reserve: out,
 
       // helpful: tells client how many digs remain on this pass
