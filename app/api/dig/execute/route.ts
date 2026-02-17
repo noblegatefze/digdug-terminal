@@ -272,6 +272,15 @@ export async function POST(req: NextRequest) {
       if (reward_usd !== null) {
         const dayUtc = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 
+        // Ensure today's Golden windows exist (idempotent)
+        {
+          const { error: wErr } = await sb.rpc("rpc_golden_ensure_today_windows", {
+            p_cap: 5,
+            p_window_minutes: 60,
+          });
+          if (wErr) console.error("[golden] ensure windows failed:", wErr.message);
+        }
+
         const { data: gdata, error: gerr } = await sb.rpc("dd_golden_try_award", {
           p_day: dayUtc,
           p_now: new Date().toISOString(),

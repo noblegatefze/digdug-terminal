@@ -332,7 +332,19 @@ async function handle(req: Request): Promise<NextResponse> {
 
   const nowIso = new Date().toISOString();
 
+  // Ensure today's Golden windows exist (idempotent)
+  {
+    const { error: wErr } = await supabaseAdmin.rpc("rpc_golden_ensure_today_windows", {
+      p_cap: 5,
+      p_window_minutes: 60,
+    });
+    if (wErr) {
+      console.error("[golden] ensure windows failed:", wErr.message);
+    }
+  }
+
   const { data: award, error: aErr } = await supabaseAdmin
+
     .rpc("dd_golden_try_award", {
       p_day: dayStr,        // Postgres will coerce to date
       p_now: nowIso,        // timestamptz
