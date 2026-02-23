@@ -30,9 +30,6 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
-
 # vercel
 .vercel
 
@@ -41,4 +38,15 @@ yarn-error.log*
 next-env.d.ts
 
 _patch_user_state_readonly.diff
+
+# =============================
+# ENV FILES (NEVER COMMIT)
+# =============================
+.env
+.env.*
+!.env.example
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 
