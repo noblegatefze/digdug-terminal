@@ -134,6 +134,16 @@ async function requireCaptchaPassForDig(args: {
   return { ok: true as const, digs_left: left - 1 };
 }
 
+function asText(v: any) {
+  const s = String(v ?? "").trim();
+  return s;
+}
+
+function isMissingInstallErr(msg: string) {
+  const m = (msg ?? "").toLowerCase();
+  return m.includes("missing_install_id");
+}
+
 export async function POST(req: NextRequest) {
   try {
     if (process.env.DIGDUG_PAUSE === "1") {
@@ -142,12 +152,12 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json().catch(() => null);
 
-    const username = String(body?.username ?? "").trim();
-    const box_id = String(body?.box_id ?? "").trim();
+    const username = asText(body?.username);
+    const box_id = asText(body?.box_id);
 
     // ✅ Server-side captcha enforcement fields
-    const install_id = String(body?.install_id ?? "").trim();
-    const captcha_pass_id = String(body?.captcha_pass_id ?? "").trim();
+    const install_id = asText(body?.install_id);
+    const captcha_pass_id = asText(body?.captcha_pass_id);
 
     if (!username || !box_id) {
       return NextResponse.json({ ok: false, error: "missing_fields" }, { status: 400 });
@@ -240,13 +250,25 @@ export async function POST(req: NextRequest) {
       p_cmc_id: null,
       p_price_usd_at_dig: null,
       p_price_at: new Date().toISOString(),
+
+      // ✅ CRITICAL: pass install_id so DB triggers + RPC accept it
+      p_install_id: install_id,
     });
 
     if (rerr) {
+      // If DB enforces install_id and it is missing/mismatched, treat as 400
+      if (isMissingInstallErr(rerr.message)) {
+        return NextResponse.json({ ok: false, error: "missing_install_id" }, { status: 400 });
+      }
       return NextResponse.json({ ok: false, error: "reserve_failed", detail: rerr.message }, { status: 500 });
     }
+
     const out: any = rdata;
     if (!out?.ok) {
+      // Surface missing_install_id cleanly if it bubbles through as a normal response object
+      if (String(out?.error ?? "") === "missing_install_id") {
+        return NextResponse.json({ ok: false, error: "missing_install_id" }, { status: 400 });
+      }
       return NextResponse.json(out ?? { ok: false, error: "reserve_failed" }, { status: 400 });
     }
 
@@ -325,10 +347,7 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (cerr && (cerr as any)?.code !== "23505") {
-      return NextResponse.json(
-        { ok: false, error: "claim_insert_failed", detail: cerr.message },
-        { status: 500 }
-      );
+      return NextResponse.json({ ok: false, error: "claim_insert_failed", detail: cerr.message }, { status: 500 });
     }
 
     // 9) Return canonical result + tier info
