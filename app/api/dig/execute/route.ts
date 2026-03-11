@@ -378,6 +378,7 @@ export async function POST(req: NextRequest) {
       captcha_digs_left: (gate as any)?.digs_left ?? null,
     });
   } catch (e: any) {
+    console.error("DIG EXECUTE FATAL", e);
     return NextResponse.json({ ok: false, error: e?.message ?? "server_error" }, { status: 500 });
   }
 }

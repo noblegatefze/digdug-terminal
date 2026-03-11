@@ -2896,6 +2896,7 @@ export default function Page() {
     let claimId = "";
 
     try {
+
       const r = await fetch("/api/dig/execute", {
         method: "POST",
         headers: { "content-type": "application/json" },
