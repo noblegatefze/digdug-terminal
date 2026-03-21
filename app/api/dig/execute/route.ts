@@ -350,7 +350,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "claim_insert_failed", detail: cerr.message }, { status: 500 });
     }
 
-    // 9) Return canonical result + tier info
+    // 9) Server-authoritative dig_success telemetry (best-effort only)
+    try {
+      await sb.from("stats_events").insert({
+        install_id,
+        event: "dig_success",
+        box_id,
+        chain: chain_id,
+        token_symbol,
+        usddd_cost: cost,
+        reward_amount,
+        priced: price_usd !== null,
+        reward_price_usd: price_usd,
+        reward_value_usd: reward_usd,
+        terminal_user_id: user.id,
+        created_at: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.error("dig_success telemetry insert failed", e);
+      // never break canonical dig flow
+    }
+
+    // 10) Return canonical result + tier info
     return NextResponse.json({
       ok: true,
       dig_id,
