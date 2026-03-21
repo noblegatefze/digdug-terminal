@@ -2,6 +2,6 @@
 // Update ONLY APP_VERSION when bumping versions.
 
 export const PHASE_LABEL = "Zero Phase";
-export const APP_VERSION = "v0.3.4.5";
+export const APP_VERSION = "v0.3.4.6";
 
 export const DISPLAY_VERSION = `${PHASE_LABEL} ${APP_VERSION}`;
