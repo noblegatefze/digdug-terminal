@@ -43,7 +43,7 @@ export default function FlatverseHome() {
             </section>
           </div>
         </div>
-        <div className="fv-footer"><Link href="/legacy-terminal">Open Legacy Terminal</Link><a href="#surface-dispatch">Surface Dispatch</a></div>
+        <div className="fv-footer"><Link href="/legacy-terminal">Open Legacy Terminal</Link><Link href="/surface-dispatch">Surface Dispatch</Link></div>
         <details className="fv-note" id="transmission" open>
           <summary>The Last Terminal Transmission</summary>
           <p>An intelligence beyond the Ice Wall took control of the Terminal and read the Zero Phase dig records. It identified the best diggers on the planet and sent them a map to treasure beneath the ice at the edge of the world.</p>
@@ -51,9 +51,7 @@ export default function FlatverseHome() {
         <section className="fv-note" id="surface-dispatch">
           <h2>Surface <span className="fv-accent">Dispatch</span></h2>
           <div className="fv-posts">
-            <article><time dateTime="2026-11-25">Pinned · 25 Nov 2026</time><h3>Practice World is open</h3><p>Explore Flatverse with simulated rewards and practice USDDD. Returning guests can resume with a private profile code.</p></article>
-            <article><time dateTime="2026-11-25">25 Nov 2026</time><h3>v0.2.19 release notes</h3><p>Use your private profile code to restore your practice profile on another device.</p></article>
-            <article><time dateTime="2026-11-25">25 Nov 2026</time><h3>Returning from Zero Phase</h3><p>For existing positions, sign in to <Link href="/legacy-terminal">Legacy Terminal</Link> and link your session in <a href="https://usddd.digdug.do/fund">Fund Network</a>.</p></article>
+            <article><time dateTime="2026-11-25">Pinned · 25 Nov 2026</time><h3>Practice World is open</h3><p>Explore Flatverse with simulated rewards and practice USDDD. Returning guests can resume with a private profile code.</p><Link className="fv-action" href="/surface-dispatch">Read Surface Dispatch</Link></article>
           </div>
         </section>
       </div>
