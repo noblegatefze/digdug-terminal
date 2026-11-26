@@ -25,7 +25,7 @@ const categoryScene: Record<string, number> = {
 function DispatchArt({ post, featured = false }: { post: Dispatch; featured?: boolean }) {
   const isCapture = post.id === "toastpunk-last-signal";
   const scene = (post.art ?? categoryScene[post.category] ?? 9) - 1;
-  const position = [4, 50, 96];
+  const position = [1, 50, 99];
   const style = isCapture ? {
     backgroundImage: "url('/toastpunk-last-transmission.png')",
     backgroundPosition: "center",
