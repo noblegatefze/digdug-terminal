@@ -69,12 +69,12 @@ export default async function SurfaceDispatch({ searchParams }: { searchParams: 
       `}</style>
       <div className="sd-shell">
         <header className="site-header">
-          <Link className="site-brand" href="/">DIGDUG.DO <span>/ SURFACE DISPATCH</span></Link>
+          <Link className="site-brand" href="https://www.digdug.do/">DIGDUG.DO <span>/ SURFACE DISPATCH</span></Link>
           <div className="dd-account-nav">
             <nav className="site-nav" aria-label="DIGDUG.DO">
-              <Link href="/">Home</Link>
+              <Link href="https://www.digdug.do/">Home</Link>
               <a href="https://usddd.digdug.do/">Observatory</a>
-              <a href="https://usddd.digdug.do/fund">Fund Network</a>
+              <a href="https://fund.digdug.do/">Fund Network</a>
               <span className="site-testnet" title="Testnet game rewards are simulated.">Live - Testnet</span>
               <a className="site-cta" href="https://play.digdug.do/">Play Flatverse</a>
             </nav>
@@ -82,7 +82,7 @@ export default async function SurfaceDispatch({ searchParams }: { searchParams: 
           </div>
         </header>
         <Script src="https://usddd.digdug.do/explorer-account.js" strategy="afterInteractive" />
-        <section className="sd-hero"><h1>Surface <span>Dispatch</span></h1><p>Recovered transmissions from the Ice Wall, alongside official Flatverse updates.</p><Link className="sd-archive-link" href="/surface-dispatch?category=lore#toastpunk-last-signal">Start with ToastPunk’s July 22 transmission ›</Link></section>
+        <section className="sd-hero"><h1>Surface <span>Dispatch</span></h1><p>Recovered transmissions from the Ice Wall, alongside official Flatverse updates.</p><Link className="sd-archive-link" href="/?category=lore#toastpunk-last-signal">Start with ToastPunk’s July 22 transmission ›</Link></section>
         {featured && <article className="sd-feature">
           <DispatchArt post={featured} featured />
           <div className="sd-copy">
@@ -95,7 +95,7 @@ export default async function SurfaceDispatch({ searchParams }: { searchParams: 
             <Link className="sd-gold" href={"#" + featured.id}>{featured.author ? "Open archive entry" : "Read dispatch"} ›</Link>
           </div>
         </article>}
-        <nav className="sd-filters" aria-label="Filter dispatches">{categories.map((item) => <Link key={item} href={item === categories[0] ? "/surface-dispatch" : "/surface-dispatch?category=" + item.toLowerCase()} aria-current={selected === item ? "page" : undefined}>{item}</Link>)}</nav>
+        <nav className="sd-filters" aria-label="Filter dispatches">{categories.map((item) => <Link key={item} href={item === categories[0] ? "/" : "/?category=" + item.toLowerCase()} aria-current={selected === item ? "page" : undefined}>{item}</Link>)}</nav>
         <section aria-label="Dispatches">
           {visible.length === 0 && <p className="sd-empty">No dispatches have been posted in this category.</p>}
           {showStory && <h2 className="sd-section-title">Story archive</h2>}
@@ -113,9 +113,9 @@ export default async function SurfaceDispatch({ searchParams }: { searchParams: 
                 <p>{post.summary}</p>
                 {post.source && <p className="sd-source">Archive source · {post.source}</p>}
                 {post.body?.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
-                {post.id === "cross-over" && <p><Link href="/#transmission">Read the homepage transmission</Link> · <a href="https://play.digdug.do/">Enter Flatverse</a></p>}
+                {post.id === "cross-over" && <p><Link href="https://www.digdug.do/#transmission">Read the homepage transmission</Link> · <a href="https://play.digdug.do/">Enter Flatverse</a></p>}
                 {post.id === "practice-world" && <p><a href="https://play.digdug.do/">Enter Flatverse</a></p>}
-                {post.id === "zero-phase" && <p><Link href="/#transmission">Read the homepage transmission</Link> · <a href="https://usddd.digdug.do/fund">Open Fund Network</a></p>}
+                {post.id === "zero-phase" && <p><Link href="https://www.digdug.do/#transmission">Read the homepage transmission</Link> · <a href="https://fund.digdug.do/">Open Fund Network</a></p>}
                 {post.id === "2c1801a3-b074-4483-bf05-b66925d6f32f" && <p><a href="https://usddd.digdug.do/">Open Observatory</a></p>}
               </details>
             </div>
