@@ -66,6 +66,9 @@ export default async function FlatverseHome() {
         .fv-guides article{padding:14px;border:1px solid #24536e;border-radius:8px;background:#0a2236}
         .fv-guide-portrait{aspect-ratio:1;margin-bottom:12px;border-radius:5px;background:url('/flatverse-guide-portraits.png') 0 0/201% 201% no-repeat #071a2d}
         .fv-guides article p{margin-top:8px;font-size:14px}
+        #enrollment{margin-bottom:14px;scroll-margin-top:16px}
+        #enrollment .fv-guides{grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr))}
+        #enrollment .fv-guides+p{margin-top:10px}
         .fv-posts article.fv-dispatch-feature{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.35fr);gap:20px;align-items:center}
         .fv-dispatch-art{display:block;width:100%;height:auto;border-radius:5px}
         @media(max-width:600px){.fv-posts article.fv-dispatch-feature{grid-template-columns:1fr;gap:12px}}
@@ -96,6 +99,26 @@ export default async function FlatverseHome() {
           </div>
         </div>
         <Script id="fv-terminal-countdown-script" strategy="afterInteractive">{countdownScript}</Script>
+        <section id="enrollment" className="fv-note" aria-labelledby="fv-enrollment-title">
+          <h2 id="fv-enrollment-title">Explorer enrollment</h2>
+          <p>Public QR enrollment is pending. Enrolled Explorers will receive starting credit in the Flatverse Practice World.</p>
+          <div className="fv-guides">
+            <article>
+              <h3>New Explorer</h3>
+              <p><strong>10 USDDD</strong> starting credit. Choose a username and set up Google Authenticator when enrollment opens.</p>
+            </article>
+            <article>
+              <h3>Legacy Badge</h3>
+              <p><strong>25 USDDD</strong> total. Get 10 USDDD starting credit and a 15 USDDD bonus when you migrate your Legacy account.</p>
+            </article>
+            <article>
+              <h3>Legacy Backer Badge</h3>
+              <p><strong>50 USDDD</strong> total. Legacy users with a funded position get 10 USDDD starting credit and a 40 USDDD bonus when they migrate.</p>
+            </article>
+          </div>
+          <p>Legacy users will verify their username and Terminal Pass once, then scan a QR code and verify a six-digit Google Authenticator code. Once enrolled, sign in with your username and current Authenticator code.</p>
+          <p>Practice World credits are simulated. For help recovering access to a Fund position, email <a href="mailto:usddd@digdug.do">usddd@digdug.do</a>.</p>
+        </section>
         <div className="fv-grid">
           <section className="fv-card fv-play">
             <div className="fv-art"><Image src="/flatverse-ice-wall.jpg" alt="" fill priority sizes="(max-width: 760px) 100vw, 62vw" style={{ objectFit: "cover", objectPosition: "65% 42%" }} /></div>
