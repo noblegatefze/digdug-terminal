@@ -7,7 +7,7 @@ const categories = ["All updates", "Releases", "Maintenance", "Migration", "Fiel
 type Dispatch = Awaited<ReturnType<typeof getDispatchPosts>>[number];
 
 const sceneDescriptions = [
-  "An overturned chair and headset outside the abandoned relay station",
+  "An overturned chair and headset inside the abandoned relay station",
   "An old Terminal lights up inside a polar cave",
   "Three mining camps along the Ice Wall",
   "Three prison doors below the ice",
@@ -27,7 +27,7 @@ function DispatchArt({ post, featured = false }: { post: Dispatch; featured?: bo
   const scene = (post.art ?? categoryScene[post.category] ?? 9) - 1;
   const position = [4, 50, 96];
   const style = isCapture ? {
-    backgroundImage: "url('/toastpunk-ice-wall-prison.png')",
+    backgroundImage: "url('/toastpunk-last-transmission.png')",
     backgroundPosition: "center",
   } : {
     backgroundImage: "url('/surface-dispatch-illustrations.png')",
