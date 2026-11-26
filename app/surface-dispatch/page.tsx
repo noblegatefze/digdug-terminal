@@ -27,7 +27,7 @@ function DispatchArt({ post, featured = false }: { post: Dispatch; featured?: bo
   const scene = (post.art ?? categoryScene[post.category] ?? 9) - 1;
   const position = [4, 50, 96];
   const style = isCapture ? {
-    backgroundImage: "url('/toastpunk-terminal-capture-v2.png')",
+    backgroundImage: "url('/toastpunk-ice-wall-prison.png')",
     backgroundPosition: "center",
   } : {
     backgroundImage: "url('/surface-dispatch-scenes.png')",
@@ -35,7 +35,7 @@ function DispatchArt({ post, featured = false }: { post: Dispatch; featured?: bo
     backgroundSize: "318% 318%",
   };
   return <div className={`sd-thumb${featured ? " sd-thumb-featured" : ""}`} style={style} role="img"
-    aria-label={isCapture ? "Possessed Digster AI operates the Terminal as the screen pulls in ToastPunk" : sceneDescriptions[scene]} />;
+    aria-label={isCapture ? "Digster AI faces forward as the Terminal pulls ToastPunk toward an icy prison cell" : sceneDescriptions[scene]} />;
 }
 
 export default async function SurfaceDispatch({ searchParams }: { searchParams: Promise<{ category?: string }> }) {
@@ -103,7 +103,7 @@ export default async function SurfaceDispatch({ searchParams }: { searchParams: 
                 <time dateTime={post.publish_at}>{day.format(new Date(post.publish_at))}</time>
                 <span className="sd-story-label">{post.author ? `Lore · ${post.author}` : post.category}</span>
               </div>
-              <details open={post.id === featured?.id || post.id === "toastpunk-last-signal"}>
+              <details open>
                 <summary>{post.title}</summary>
                 <p>{post.summary}</p>
                 {post.source && <p className="sd-source">Archive source · {post.source}</p>}

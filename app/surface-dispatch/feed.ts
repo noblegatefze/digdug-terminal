@@ -8,7 +8,7 @@ const lorePosts: Dispatch[] = [
     "summary": "The relay camera catches Digster AI at the controls as the Terminal pulls ToastPunk through the screen.",
     "body": [
       "“Digster, take your hands off the keys. Digster? The whole screen’s bending. I can’t get away from the—”",
-      "In the final camera frame, blue light runs through Digster AI’s armor as his hands keep typing. ToastPunk spins toward the screen, his crust breaking into blue pixels as the pull takes him through. The picture cuts to blue. This is the last transmission the relay can verify as his."
+      "In the final camera frame, blue light runs through Digster AI’s armor as his hands keep typing. ToastPunk spins toward the screen, his crust breaking into blue pixels. For a moment, the relay camera catches iron bars and an amber light deep in the ice beyond the glass. Then the picture cuts to blue. This is the last transmission the relay can verify as his."
     ],
     "art": 0,
     "category": "Lore",
