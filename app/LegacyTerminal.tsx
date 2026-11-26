@@ -5084,7 +5084,7 @@ export default function Page() {
           {lines.map((l) => (
             <div key={l.id} className={`dd-line dd-${l.kind}`}>
               <span className="dd-ts">[{l.t}]</span>
-              <span className="dd-text">{renderSegments(l.text)}{l.migrationNotice && <> Legacy Terminal detonation: 1 January 2027 at 00:00 UTC. If you haven’t enrolled, go to <a href="/#enrollment" target="_blank" rel="noopener noreferrer">Explorer enrollment</a>.</>}{l.flatverseLink && <> <a href="https://play.digdug.do/" target="_blank" rel="noopener noreferrer">Go to Flatverse</a>.</>}</span>
+              <span className="dd-text">{renderSegments(l.text)}{l.migrationNotice && <> Legacy Terminal detonation: 1 January 2027 at 00:00 UTC. If you haven’t enrolled, go to <a href="https://www.digdug.do/#enrollment" target="_blank" rel="noopener noreferrer">Explorer enrollment</a>.</>}{l.flatverseLink && <> <a href="https://play.digdug.do/" target="_blank" rel="noopener noreferrer">Go to Flatverse</a>.</>}</span>
             </div>
           ))}
           <div className="dd-cursor" aria-hidden="true">
