@@ -66,9 +66,9 @@ export default async function FlatverseHome() {
         .fv-guides article{padding:14px;border:1px solid #24536e;border-radius:8px;background:#0a2236}
         .fv-guide-portrait{aspect-ratio:1;margin-bottom:12px;border-radius:5px;background:url('/flatverse-guide-portraits.png') 0 0/201% 201% no-repeat #071a2d}
         .fv-guides article p{margin-top:8px;font-size:14px}
-        #enrollment{margin-bottom:14px;scroll-margin-top:16px}
-        #enrollment .fv-guides{grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr))}
-        #enrollment .fv-guides+p{margin-top:10px}
+        .fv-enrollment-banner{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px 16px;margin-top:14px;padding:9px 13px;border:1px solid #24536e;border-radius:6px;background:#061828;color:#cadcec;font-size:13px;scroll-margin-top:16px}
+        .fv-enrollment-banner button{cursor:pointer;background:#10273a;font-weight:700}
+        .fv-enrollment-banner button:hover{background:#17394e}
         .fv-posts article.fv-dispatch-feature{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.35fr);gap:20px;align-items:center}
         .fv-dispatch-art{display:block;width:100%;height:auto;border-radius:5px}
         @media(max-width:600px){.fv-posts article.fv-dispatch-feature{grid-template-columns:1fr;gap:12px}}
@@ -103,27 +103,6 @@ export default async function FlatverseHome() {
           </div>
         </div>
         <Script id="fv-terminal-countdown-script" strategy="afterInteractive">{countdownScript}</Script>
-        <section id="enrollment" className="fv-note" aria-labelledby="fv-enrollment-title">
-          <h2 id="fv-enrollment-title">Explorer enrollment</h2>
-          <p>Enrolled Explorers receive starting credit in the Flatverse Practice World. Check the form for enrollment availability.</p>
-          <div className="fv-guides">
-            <article>
-              <h3>New Explorer</h3>
-              <p><strong>10 USDDD</strong> starting credit. Choose a username and set up Google Authenticator when enrollment opens.</p>
-            </article>
-            <article>
-              <h3>Legacy Badge</h3>
-              <p><strong>25 USDDD</strong> total. Get 10 USDDD starting credit and a 15 USDDD bonus when you migrate your Legacy account.</p>
-            </article>
-            <article>
-              <h3>Legacy Backer Badge</h3>
-              <p><strong>50 USDDD</strong> total. Legacy users with a funded position get 10 USDDD starting credit and a 40 USDDD bonus when they migrate.</p>
-            </article>
-          </div>
-          <p>Legacy users will verify their username and Terminal Pass once, then scan a QR code and verify a six-digit Google Authenticator code. Once enrolled, sign in with your username and current Authenticator code.</p>
-          <button type="button" data-open-explorer-account="" className="fv-action">Open Explorer account</button>
-          <p>Practice World credits are simulated. For help recovering access to a Fund position, email <a href="mailto:usddd@digdug.do">usddd@digdug.do</a>.</p>
-        </section>
         <div className="fv-grid">
           <section className="fv-card fv-play">
             <div className="fv-art"><Image src="/flatverse-ice-wall.jpg" alt="" fill priority sizes="(max-width: 760px) 100vw, 62vw" style={{ objectFit: "cover", objectPosition: "65% 42%" }} /></div>
@@ -156,6 +135,10 @@ export default async function FlatverseHome() {
           </div>
         </div>
         <div className="fv-footer"><Link href="/legacy-terminal">Open Legacy Terminal</Link><Link href="/surface-dispatch">Surface Dispatch</Link></div>
+        <aside id="enrollment" className="fv-enrollment-banner" aria-label="Explorer enrollment">
+          <p><strong>New to Flatverse?</strong> Set up an Explorer account for 10 USDDD in starting practice credit. Legacy accounts may qualify for a bonus.</p>
+          <button type="button" className="fv-minor" data-open-explorer-account>Set up account</button>
+        </aside>
         <details className="fv-note" id="transmission" open>
           <summary>The Last Terminal Transmission</summary>
           <p>For months, ToastPunk’s X account stayed silent. The original founder had been captured. When a digger entered an encrypted command in the Legacy Terminal, the intelligence behind the Ice Wall used it to infiltrate the DIGDUG.DO and USDDD systems in the world of Flatverse.</p>
