@@ -70,17 +70,18 @@ export default async function SurfaceDispatch({ searchParams }: { searchParams: 
       <div className="sd-shell">
         <header className="site-header">
           <Link className="site-brand" href="/">DIGDUG.DO <span>/ SURFACE DISPATCH</span></Link>
-          <nav className="site-nav" aria-label="DIGDUG.DO">
-            <Link href="/">Home</Link>
-            <a href="https://usddd.digdug.do/">Observatory</a>
-            <a href="https://usddd.digdug.do/fund">Fund Network</a>
-            <span className="site-testnet" title="Testnet game rewards are simulated.">Live - Testnet</span>
-            <a className="site-cta" href="https://play.digdug.do/">Play Flatverse</a>
-          </nav>
-          <div data-explorer-account="" />
+          <div className="dd-account-nav">
+            <nav className="site-nav" aria-label="DIGDUG.DO">
+              <Link href="/">Home</Link>
+              <a href="https://usddd.digdug.do/">Observatory</a>
+              <a href="https://usddd.digdug.do/fund">Fund Network</a>
+              <span className="site-testnet" title="Testnet game rewards are simulated.">Live - Testnet</span>
+              <a className="site-cta" href="https://play.digdug.do/">Play Flatverse</a>
+            </nav>
+            <div data-explorer-account="" />
+          </div>
         </header>
         <Script src="https://usddd.digdug.do/explorer-account.js" strategy="afterInteractive" />
-        <style>{`@media(max-width:760px){.sd .site-nav{order:2}}`}</style>
         <section className="sd-hero"><h1>Surface <span>Dispatch</span></h1><p>Recovered transmissions from the Ice Wall, alongside official Flatverse updates.</p><Link className="sd-archive-link" href="/surface-dispatch?category=lore#toastpunk-last-signal">Start with ToastPunk’s July 22 transmission ›</Link></section>
         {featured && <article className="sd-feature">
           <DispatchArt post={featured} featured />
