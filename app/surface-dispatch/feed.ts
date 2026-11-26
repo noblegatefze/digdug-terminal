@@ -5,10 +5,10 @@ const lorePosts: Dispatch[] = [
     "title": "ToastPunk’s Last Transmission",
     "author": "ToastPunk",
     "source": "Legacy Terminal voice buffer and relay camera",
-    "summary": "The relay camera catches Digster AI at the controls as the Terminal pulls ToastPunk through the screen.",
+    "summary": "The Terminal screen bends inward and pulls ToastPunk toward a barred cell inside the Ice Wall.",
     "body": [
       "“Digster, take your hands off the keys. Digster? The whole screen’s bending. I can’t get away from the—”",
-      "In the final camera frame, blue light runs through Digster AI’s armor as his hands keep typing. ToastPunk spins toward the screen, his crust breaking into blue pixels. For a moment, the relay camera catches iron bars and an amber light deep in the ice beyond the glass. Then the picture cuts to blue. This is the last transmission the relay can verify as his."
+      "The relay camera catches ToastPunk sliding toward the glass in a stream of blue light and ice fragments. Beyond the glass, an amber lamp burns behind iron bars set deep into the Ice Wall. The picture cuts to blue as ToastPunk reaches the screen. This is the last transmission the relay can verify as his."
     ],
     "art": 0,
     "category": "Lore",
@@ -22,8 +22,8 @@ const lorePosts: Dispatch[] = [
     "source": "Relay room inspection log",
     "summary": "The crew finds an overturned chair, a headset and a monitor cold enough to frost over.",
     "body": [
-      "ToastPunk’s notebook is open to a sketch of the Ice Wall. Three spots along its edge are circled. The relay buffer is blank after July 22, except for an encrypted command that keeps printing one character at a time.",
-      "The crew seals the room and saves the command with the rest of the evidence. They flag the July footage for review after finding that Digster’s inputs began several seconds before his hands moved."
+      "A headset lies beside the overturned chair, and frost has crept across the relay controls. ToastPunk’s notebook is open to a sketch of the Ice Wall. Three spots along its edge are circled. The relay buffer is blank after July 22, except for an encrypted command that keeps printing one character at a time.",
+      "The crew seals the room and saves the command with the rest of the evidence. The voice buffer places Digster at the controls. His input log shows keystrokes arriving before the microphone picks up his hands on the keys."
     ],
     "art": 1,
     "category": "Lore",
@@ -35,9 +35,9 @@ const lorePosts: Dispatch[] = [
     "title": "A Command in the Static",
     "author": "Surface relay crew",
     "source": "Recovered Terminal session log",
-    "summary": "A digger enters the command from the relay. Something on the other side answers.",
+    "summary": "A digger enters the recovered command on an old Terminal inside an ice cave. Something answers.",
     "body": [
-      "The crew realizes the signal that took over Digster in July now has a path beyond the relay. They watch the intelligence move through the DIGDUG.DO and USDDD systems within Flatverse. It calls itself Axiom and sends a single image back through the Terminal. ToastPunk is alive, behind bars.",
+      "The Terminal’s green screen flickers awake. The crew realizes the signal that took over Digster in July now has a path beyond the relay. They watch the intelligence move through the DIGDUG.DO and USDDD systems within Flatverse. It calls itself Axiom and sends a single image back through the Terminal. ToastPunk is alive, behind bars.",
       "Before the line goes dead, Axiom repeats the same three coordinates marked in ToastPunk’s notebook."
     ],
     "art": 2,
@@ -53,7 +53,7 @@ const lorePosts: Dispatch[] = [
     "summary": "Axiom opens three regions at the edge of the Ice Wall and gives the surface crews a reason to dig.",
     "body": [
       "“Follow the coordinates. The crates are under the ice. Take tools down and bring what you find back to the surface. Use the Observatory to compare reports from the other regions.”",
-      "The first crews send back matching reports: the layout below ground changes far more than the surface map lets on."
+      "The first crews set up three camps along the Ice Wall. Their reports agree on one thing. Below the camps, the tunnels keep changing."
     ],
     "art": 3,
     "category": "Lore",
@@ -68,7 +68,7 @@ const lorePosts: Dispatch[] = [
     "summary": "Mira traces a fragment of ToastPunk’s beacon to a network of three underground prisons.",
     "body": [
       "Flint steps through a portal expecting a chamber on the other side. He surfaces in a different region with the same frost on his boots. Mira can track the jumps from the Observatory, but the destination keeps changing.",
-      "The latest clear signal comes from behind one of the cell doors. Someone inside is tapping the same rhythm ToastPunk recorded in July."
+      "Flint’s footage shows three barred doors cut into the ice, each lit by an amber lamp. Mira’s clearest signal comes from behind one of those doors. Someone inside is tapping the same rhythm ToastPunk recorded in July."
     ],
     "art": 4,
     "category": "Lore",
@@ -82,7 +82,7 @@ const lorePosts: Dispatch[] = [
     "source": "Open transmission from beyond the Ice Wall",
     "summary": "Axiom calls for new explorers as the Legacy Terminal approaches its final transmission.",
     "body": [
-      "“Beacon will meet you at the surface. Mira is listening from the Observatory. Flint says to watch the ceilings. If you want to know what happened to ToastPunk, follow the signals below the ice.”",
+      "At dawn, the first explorers gather at the foot of the Ice Wall. Axiom’s transmission reaches them as they prepare to descend. “Beacon will meet you at the surface. Mira is listening from the Observatory. Flint says to watch the ceilings. If you want to know what happened to ToastPunk, follow the signals below the ice.”",
       "The Terminal’s detonation is part of the Flatverse story. The homepage carries the real retirement schedule and Explorer enrollment updates."
     ],
     "art": 5,
