@@ -1,5 +1,4 @@
 import Image from "next/image";
-import Link from "next/link";
 import Script from "next/script";
 import { day, getDispatchPosts } from "../surface-dispatch/feed";
 
@@ -10,7 +9,7 @@ const pancakeSwapUrl = "https://pancake.xyz/swap?inputCurrency=0x55d398326f99059
 const networkLinks = [
   { title: "PancakeSwap", description: "USDDD / USDT on BNB Chain", href: pancakeSwapUrl },
   { title: "Whitepaper", description: "Read the protocol documents", href: "https://github.com/noblegatefze/digdug-whitepaper" },
-  { title: "Back the Exploration", description: "Visit the Fund Network", href: "https://usddd.digdug.do/fund" },
+  { title: "Back the Exploration", description: "Visit the Fund Network", href: "https://fund.digdug.do/" },
 ];
 
 const guides = [
@@ -81,8 +80,8 @@ export default async function FlatverseHome() {
           <div className="dd-account-nav">
             <nav className="site-nav" aria-label="DIGDUG.DO">
               <a href="https://usddd.digdug.do/">Observatory</a>
-              <Link href="/surface-dispatch">Surface Dispatch</Link>
-              <a href="https://usddd.digdug.do/fund">Fund Network</a>
+              <a href="https://feed.digdug.do/">Surface Dispatch</a>
+              <a href="https://fund.digdug.do/">Fund Network</a>
               <span className="site-testnet" title="Testnet game rewards are simulated.">Live - Testnet</span>
               <a className="site-cta" href="https://play.digdug.do/">Play Flatverse</a>
             </nav>
@@ -155,7 +154,7 @@ export default async function FlatverseHome() {
             </section>
           </div>
         </div>
-        <div className="fv-footer"><Link href="/legacy-terminal">Open Legacy Terminal</Link><Link href="/surface-dispatch">Surface Dispatch</Link></div>
+        <div className="fv-footer"><a href="https://old.digdug.do/">Open Legacy Terminal</a><a href="https://feed.digdug.do/">Surface Dispatch</a></div>
         <details className="fv-note" id="transmission" open>
           <summary>The Last Terminal Transmission</summary>
           <p>For months, ToastPunk’s X account stayed silent. The original founder had been captured. When a digger entered an encrypted command in the Legacy Terminal, the intelligence behind the Ice Wall used it to infiltrate the DIGDUG.DO and USDDD systems in the world of Flatverse.</p>
@@ -186,7 +185,7 @@ export default async function FlatverseHome() {
                   <time dateTime={featured.publish_at}>{day.format(new Date(featured.publish_at))}</time>
                   <h3>{featured.title}</h3>
                   <p>{featured.summary}</p>
-                  <Link className="fv-action" href={"/surface-dispatch#" + featured.id}>Read ToastPunk’s Last Transmission</Link>
+                  <a className="fv-action" href={"https://feed.digdug.do/#" + featured.id}>Read ToastPunk’s Last Transmission</a>
                 </div>
               </article>
             </div>
