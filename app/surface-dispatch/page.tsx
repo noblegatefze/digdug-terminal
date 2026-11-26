@@ -7,7 +7,7 @@ const categories = ["All updates", "Releases", "Maintenance", "Migration", "Fiel
 type Dispatch = Awaited<ReturnType<typeof getDispatchPosts>>[number];
 
 const editorialArt: Record<string, string> = {
-  "practice-world": "/flatverse-mine-cross-section.jpg",
+  "practice-world": "/flatverse-ice-wall.jpg",
   "v0-2-19": "/flatverse-ice-wall.jpg",
   "zero-phase": "/flatverse-ice-wall.jpg",
 };
@@ -18,7 +18,7 @@ function DispatchArt({ post, featured = false }: { post: Dispatch; featured?: bo
     ? "/flatverse-ice-wall.jpg" : "/flatverse-observatory.jpg");
   const style = art === undefined ? {
     backgroundImage: `url('${image}')`,
-    backgroundPosition: post.id === "v0-2-19" ? "75% 35%" : post.id === "zero-phase" ? "25% 75%" : "center",
+    backgroundPosition: post.id === "practice-world" ? "50% 90%" : post.id === "v0-2-19" ? "75% 35%" : post.id === "zero-phase" ? "25% 75%" : "center",
   } : {
     backgroundImage: "url('/surface-dispatch-lore.png')",
     backgroundPosition: `${(art % 2) * 100}% ${Math.floor(art / 2) * 50}%`,
