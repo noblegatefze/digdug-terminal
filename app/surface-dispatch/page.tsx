@@ -27,7 +27,7 @@ function DispatchArt({ post, featured = false }: { post: Dispatch; featured?: bo
   const scene = (post.art ?? categoryScene[post.category] ?? 9) - 1;
   const position = [1, 50, 99];
   const style = isCapture ? {
-    backgroundImage: "url('/toastpunk-last-transmission.png')",
+    backgroundImage: "url('/toastpunk-terminal-prison.png')",
     backgroundPosition: "center",
   } : {
     backgroundImage: "url('/surface-dispatch-illustrations.png')",
@@ -35,7 +35,7 @@ function DispatchArt({ post, featured = false }: { post: Dispatch; featured?: bo
     backgroundSize: "318% 318%",
   };
   return <div className={`sd-thumb${featured ? " sd-thumb-featured" : ""}`} style={style} role="img"
-    aria-label={isCapture ? "Digster AI faces forward as the Terminal pulls ToastPunk toward an icy prison cell" : sceneDescriptions[scene]} />;
+    aria-label={isCapture ? "ToastPunk is pulled through the Terminal screen toward the barred prison inside the Ice Wall" : sceneDescriptions[scene]} />;
 }
 
 export default async function SurfaceDispatch({ searchParams }: { searchParams: Promise<{ category?: string }> }) {
