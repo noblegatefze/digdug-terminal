@@ -1194,7 +1194,7 @@ export default function Page() {
         if (!r.ok) {
           emit("err", data?.error ?? `Register failed (HTTP ${r.status})`);
           emit("info", "NEXT");
-          emit("sys", `Next: ${C("register")}`);
+          emit("sys", `Next: ${C("login")}`);
           return;
         }
 
@@ -2018,8 +2018,7 @@ export default function Page() {
     if (terminalPass) return true;
     emit("warn", "TERMINAL PASS REQUIRED");
     emit("info", "NEXT");
-    emit("sys", `Next: ${C("register")}`);
-    emit("sys", `Or: ${C("login")}`);
+    emit("sys", `Next: ${C("login")}`);
     return false;
   };
   const require2FAEnabled = () => {
@@ -2428,7 +2427,7 @@ export default function Page() {
   const doStatus = () => {
     if (!terminalPass) {
       emit("err", "No active terminal pass found.");
-      emit("info", `Next: ${C("register")}  -  or  -  ${C("login")}`);
+      emit("info", `Next: ${C("login")}`);
       return;
     }
 
@@ -2535,15 +2534,13 @@ export default function Page() {
         emit("sys", "");
         emit("warn", "TERMINAL PASS REQUIRED");
         emit("info", "NEXT");
-        emit("sys", `Next: ${C("register")}`);
-        emit("sys", `Or: ${C("login")}`);
+        emit("sys", `Next: ${C("login")}`);
       }
     } catch {
       emit("sys", "");
       emit("warn", "TERMINAL PASS REQUIRED");
       emit("info", "NEXT");
-      emit("sys", `Next: ${C("register")}`);
-      emit("sys", `Or: ${C("login")}`);
+      emit("sys", `Next: ${C("login")}`);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [passLoaded]);
@@ -3754,14 +3751,11 @@ export default function Page() {
       emit("sys", "");
       emit("warn", "TERMINAL PASS REQUIRED");
       emit("info", "NEXT");
-      emit("sys", `Next: ${C("register")}`);
-      emit("sys", `Or: ${C("login")}`);
+      emit("sys", `Next: ${C("login")}`);
       return;
     }
     if (low === "register") {
-      if (terminalPass) return emit("info", `Already logged in as: ${terminalPass.username}.`);
-      emit("info", "Claim Terminal Pass - enter username:");
-      setPrompt({ mode: "REG_USER" });
+      emit("info", "Legacy Terminal registration is closed. Existing users can still log in.");
       return;
     }
     if (low === "login") {
@@ -5017,9 +5011,8 @@ export default function Page() {
     };
 
     const toolbox: Array<{ label: string; cmd: string }> = [
-      { label: authedUser ? `Pass: ${authedUser}` : "Register / Login", cmd: authedUser ? "whoami" : "register" },
+      { label: authedUser ? `Pass: ${authedUser}` : "Login", cmd: authedUser ? "whoami" : "login" },
       { label: "WhoAmI", cmd: "whoami" },
-      { label: "Register", cmd: "register" },
       { label: "Login", cmd: "login" },
       { label: "Logout", cmd: "logout" },
       { label: "Wallet", cmd: "wallet" },
