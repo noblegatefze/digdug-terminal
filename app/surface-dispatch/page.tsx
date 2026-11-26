@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Script from "next/script";
 import { day, getDispatchPosts } from "./feed";
 
 export const metadata = { title: "Surface Dispatch | DIGDUG.DO" };
@@ -76,7 +77,10 @@ export default async function SurfaceDispatch({ searchParams }: { searchParams: 
             <span className="site-testnet" title="Testnet game rewards are simulated.">Live - Testnet</span>
             <a className="site-cta" href="https://play.digdug.do/">Play Flatverse</a>
           </nav>
+          <div data-explorer-account="" />
         </header>
+        <Script src="https://usddd.digdug.do/explorer-account.js" strategy="afterInteractive" />
+        <style>{`@media(max-width:760px){.sd .site-nav{order:2}}`}</style>
         <section className="sd-hero"><h1>Surface <span>Dispatch</span></h1><p>Recovered transmissions from the Ice Wall, alongside official Flatverse updates.</p><Link className="sd-archive-link" href="/surface-dispatch?category=lore#toastpunk-last-signal">Start with ToastPunk’s July 22 transmission ›</Link></section>
         {featured && <article className="sd-feature">
           <DispatchArt post={featured} featured />
