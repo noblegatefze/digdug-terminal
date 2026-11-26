@@ -67,7 +67,7 @@ export default async function FlatverseHome() {
         .fv-guide-portrait{aspect-ratio:1;margin-bottom:12px;border-radius:5px;background:url('/flatverse-guide-portraits.png') 0 0/201% 201% no-repeat #071a2d}
         .fv-guides article p{margin-top:8px;font-size:14px}
         #enrollment{margin-bottom:14px;scroll-margin-top:16px}
-        .fv-enrollment-form{display:block;width:100%;height:min(720px,85vh);min-height:440px;margin:16px 0;border:1px solid #24536e;border-radius:8px;background:#071c2f}
+        @media(max-width:760px){.fv .site-nav{order:2}}
         #enrollment .fv-guides{grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr))}
         #enrollment .fv-guides+p{margin-top:10px}
         .fv-posts article.fv-dispatch-feature{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.35fr);gap:20px;align-items:center}
@@ -86,7 +86,9 @@ export default async function FlatverseHome() {
             <span className="site-testnet" title="Testnet game rewards are simulated.">Live - Testnet</span>
             <a className="site-cta" href="https://play.digdug.do/">Play Flatverse</a>
           </nav>
+          <div data-explorer-account="" />
         </header>
+        <Script src="https://usddd.digdug.do/explorer-account.js" strategy="afterInteractive" />
         <div className="fv-signal">
           <span>Signal from beyond the Ice Wall</span>
           <div className="fv-signal-actions">
@@ -118,7 +120,7 @@ export default async function FlatverseHome() {
             </article>
           </div>
           <p>Legacy users will verify their username and Terminal Pass once, then scan a QR code and verify a six-digit Google Authenticator code. Once enrolled, sign in with your username and current Authenticator code.</p>
-          <iframe title="Explorer account forms" src="https://usddd.digdug.do/fund/access" loading="lazy" className="fv-enrollment-form" />
+          <button type="button" data-open-explorer-account="" className="fv-action">Open Explorer account</button>
           <p>Practice World credits are simulated. For help recovering access to a Fund position, email <a href="mailto:usddd@digdug.do">usddd@digdug.do</a>.</p>
         </section>
         <div className="fv-grid">
