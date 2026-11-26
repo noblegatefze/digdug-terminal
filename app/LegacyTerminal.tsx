@@ -4303,7 +4303,8 @@ export default function Page() {
             emit("ok", "You’ve already migrated to Flatverse. You no longer need to return to the Legacy Terminal.", false, true);
           } else if (data.migration === "pending") {
             if (data.legacyBadge) {
-              emit("info", `Your enrollment reward: ${data.legacyBadge}. You qualify to claim it when you complete Explorer enrollment.`, true);
+              const bonus = data.legacyBadge === "Legacy Backer Badge" ? 40 : 15;
+              emit("info", `Your enrollment reward: ${data.legacyBadge} and ${10 + bonus} USDDD total starting credit in the Practice World (10 USDDD base + ${bonus} USDDD bonus). Practice credits are simulated.`, true);
             } else {
               emit("warn", "Your badge eligibility is temporarily unavailable.", true);
             }
@@ -5083,7 +5084,7 @@ export default function Page() {
           {lines.map((l) => (
             <div key={l.id} className={`dd-line dd-${l.kind}`}>
               <span className="dd-ts">[{l.t}]</span>
-              <span className="dd-text">{renderSegments(l.text)}{l.migrationNotice && <> Legacy Terminal detonation: 1 January 2027 at 00:00 UTC. If you haven’t enrolled, go to <a href="/#transmission" target="_blank" rel="noopener noreferrer">Explorer enrollment</a>.</>}{l.flatverseLink && <> <a href="https://play.digdug.do/" target="_blank" rel="noopener noreferrer">Go to Flatverse</a>.</>}</span>
+              <span className="dd-text">{renderSegments(l.text)}{l.migrationNotice && <> Legacy Terminal detonation: 1 January 2027 at 00:00 UTC. If you haven’t enrolled, go to <a href="/#enrollment" target="_blank" rel="noopener noreferrer">Explorer enrollment</a>.</>}{l.flatverseLink && <> <a href="https://play.digdug.do/" target="_blank" rel="noopener noreferrer">Go to Flatverse</a>.</>}</span>
             </div>
           ))}
           <div className="dd-cursor" aria-hidden="true">
