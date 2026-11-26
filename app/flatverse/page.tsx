@@ -67,7 +67,6 @@ export default async function FlatverseHome() {
         .fv-guide-portrait{aspect-ratio:1;margin-bottom:12px;border-radius:5px;background:url('/flatverse-guide-portraits.png') 0 0/201% 201% no-repeat #071a2d}
         .fv-guides article p{margin-top:8px;font-size:14px}
         #enrollment{margin-bottom:14px;scroll-margin-top:16px}
-        @media(max-width:760px){.fv .site-nav{order:2}}
         #enrollment .fv-guides{grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr))}
         #enrollment .fv-guides+p{margin-top:10px}
         .fv-posts article.fv-dispatch-feature{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.35fr);gap:20px;align-items:center}
@@ -79,14 +78,16 @@ export default async function FlatverseHome() {
       <div className="fv-shell">
         <header className="site-header">
           <strong className="site-brand">DIGDUG.DO</strong>
-          <nav className="site-nav" aria-label="DIGDUG.DO">
-            <a href="https://usddd.digdug.do/">Observatory</a>
-            <Link href="/surface-dispatch">Surface Dispatch</Link>
-            <a href="https://usddd.digdug.do/fund">Fund Network</a>
-            <span className="site-testnet" title="Testnet game rewards are simulated.">Live - Testnet</span>
-            <a className="site-cta" href="https://play.digdug.do/">Play Flatverse</a>
-          </nav>
-          <div data-explorer-account="" />
+          <div className="dd-account-nav">
+            <nav className="site-nav" aria-label="DIGDUG.DO">
+              <a href="https://usddd.digdug.do/">Observatory</a>
+              <Link href="/surface-dispatch">Surface Dispatch</Link>
+              <a href="https://usddd.digdug.do/fund">Fund Network</a>
+              <span className="site-testnet" title="Testnet game rewards are simulated.">Live - Testnet</span>
+              <a className="site-cta" href="https://play.digdug.do/">Play Flatverse</a>
+            </nav>
+            <div data-explorer-account="" />
+          </div>
         </header>
         <Script src="https://usddd.digdug.do/explorer-account.js" strategy="afterInteractive" />
         <div className="fv-signal">
