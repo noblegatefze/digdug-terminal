@@ -30,7 +30,7 @@ const countdownScript = `
     function update() {
       const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
       if (remaining === 0) {
-        time.textContent = "Countdown ended";
+        time.textContent = "Countdown complete";
         window.clearInterval(timer);
         return;
       }
@@ -44,10 +44,7 @@ const countdownScript = `
 `;
 
 export default async function FlatverseHome() {
-  const configuredDeadline = process.env.FLATVERSE_LEGACY_TERMINAL_RETIREMENT_UTC ?? "";
-  const deadline = configuredDeadline.endsWith("Z") && Number.isFinite(Date.parse(configuredDeadline))
-    ? new Date(configuredDeadline)
-    : null;
+  const deadline = new Date("2027-01-01T00:00:00Z");
   const posts = await getDispatchPosts();
   const featured = posts.find((post) => post.id === "toastpunk-last-signal");
   return (
@@ -91,16 +88,14 @@ export default async function FlatverseHome() {
           <div className="fv-signal-actions">
             <div className="fv-countdown">
               <small>Legacy Terminal detonation</small>
-              {deadline ? (
-                <time id="fv-terminal-countdown" dateTime={deadline.toISOString()} title={deadline.toUTCString()}>
-                  {deadline.toUTCString()}
-                </time>
-              ) : <strong>Date pending</strong>}
+              <time id="fv-terminal-countdown" dateTime={deadline.toISOString()} title={deadline.toUTCString()}>
+                {deadline.toUTCString()}
+              </time>
             </div>
             <a className="fv-minor" href="#transmission">Read transmission</a>
           </div>
         </div>
-        {deadline && <Script id="fv-terminal-countdown-script" strategy="afterInteractive">{countdownScript}</Script>}
+        <Script id="fv-terminal-countdown-script" strategy="afterInteractive">{countdownScript}</Script>
         <div className="fv-grid">
           <section className="fv-card fv-play">
             <div className="fv-art"><Image src="/flatverse-ice-wall.jpg" alt="" fill priority sizes="(max-width: 760px) 100vw, 62vw" style={{ objectFit: "cover", objectPosition: "65% 42%" }} /></div>
@@ -137,7 +132,7 @@ export default async function FlatverseHome() {
           <summary>The Last Terminal Transmission</summary>
           <p>For months, ToastPunk’s X account stayed silent. The original founder had been captured. When a digger entered an encrypted command in the Legacy Terminal, the intelligence behind the Ice Wall used it to infiltrate the DIGDUG.DO and USDDD systems in the world of Flatverse.</p>
           <p>The new controllers opened three regions along the Ice Wall and revealed where the real treasure was buried. Take tools underground, extract hidden crates, and use the Observatory to see what other explorers are bringing to the surface. The map above ground tells only part of the story. Cross over as an explorer to find out what lies below.</p>
-          <p>In the story, the Legacy Terminal is set to detonate. Existing diggers will move to QR-based Explorer enrollment when the migration opens. The retirement schedule will be announced here.</p>
+          <p>In the story, the Legacy Terminal is set to detonate. Existing diggers will move to QR-based Explorer enrollment when the migration opens. Legacy Terminal registration is closed. The Terminal retirement deadline is 1 January 2027 at 00:00 UTC.</p>
         </details>
         <section className="fv-note" id="explorer-guides">
           <h2>Meet the Explorer Guides</h2>
