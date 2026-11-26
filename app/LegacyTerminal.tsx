@@ -25,7 +25,7 @@ import { DISPLAY_VERSION } from "@/app/lib/build";
 type ConsoleMode = "USER" | "SPONSOR" | "ADMIN";
 type LineKind = "sys" | "info" | "ok" | "warn" | "err" | "cmd";
 
-type TermLine = { id: string; t: string; console?: ConsoleMode; kind: LineKind; text: string };
+type TermLine = { id: string; t: string; console?: ConsoleMode; kind: LineKind; text: string; migrationNotice?: boolean };
 
 type PromptMode =
   | "IDLE"
@@ -1227,8 +1227,7 @@ export default function Page() {
         emit("warn", `SAVE THIS PASS (you will need it to login): ${G(pass)}`);
         emit("sys", "");
         emit("info", "NEXT");
-        emit("sys", `Next: ${C("user")}`);
-        emit("sys", `Or: ${C("sponsor")}`);
+        emit("sys", `Next: ${C("logout")}`);
       } catch (e: any) {
         emit("err", `Register failed: ${e?.message ?? "Unknown error"}`);
       }
@@ -1329,9 +1328,9 @@ export default function Page() {
   useEffect(() => void (claimsRef.current = claims), [claims]);
   useEffect(() => void (digGateRef.current = digGate), [digGate]);
 
-  const emit = (kind: LineKind, text: string) => {
+  const emit = (kind: LineKind, text: string, migrationNotice = false) => {
     const c = consoleModeRef.current;
-    setLines((prev) => [...prev, { id: uid("l"), t: nowTs(), console: c, kind, text }]);
+    setLines((prev) => [...prev, { id: uid("l"), t: nowTs(), console: c, kind, text, migrationNotice }]);
   };
 
   function hardRefresh() {
@@ -2528,8 +2527,7 @@ export default function Page() {
         emit("sys", "");
         emit("ok", `Welcome back: ${G(u)}`);
         emit("info", "NEXT");
-        emit("sys", `Next: ${C("user")}`);
-        emit("sys", `Or: ${C("sponsor")}`);
+        emit("sys", `Next: ${C("logout")}`);
       } else {
         emit("sys", "");
         emit("warn", "TERMINAL PASS REQUIRED");
@@ -3564,11 +3562,20 @@ export default function Page() {
     });
   };
 
+  const showCorruption = () => emit("err", "MALFUNCTION E-2026: Legacy Terminal command data corrupted. Operations have moved to Flatverse.", true);
+  const isLegacyAuthCommand = (command: string) => ["login", "logout"].includes(command);
+
   // COMMAND ROUTER
   const runCommand = async (raw: string) => {
     const v = normalizeInput(raw);
     if (!v) return;
     const low = v.toLowerCase();
+
+    if (!isLegacyAuthCommand(low)) {
+      emit("cmd", `> ${v}`);
+      showCorruption();
+      return;
+    }
 
     const ok = await checkBuildFreshness();
     if (!ok) return;
@@ -4037,6 +4044,19 @@ export default function Page() {
   const submitInput = async (raw: string) => {
     const value = raw; // do not trim yet (we allow empty ENTER for withdraw addr)
     const trimmed = normalizeInput(raw);
+    if (!trimmed) return;
+    const command = trimmed.toLowerCase();
+    if (isLegacyAuthCommand(command)) {
+      setPrompt({ mode: "IDLE" });
+      void runCommand(trimmed);
+      return;
+    }
+    if (!["LOGIN_USER", "LOGIN_PASS"].includes(prompt.mode)) {
+      if (prompt.mode !== "IDLE") setPrompt({ mode: "IDLE" });
+      void runCommand(trimmed);
+      return;
+    }
+
     const ok = await checkBuildFreshness();
     if (!ok) return;
 
@@ -4060,7 +4080,7 @@ export default function Page() {
       return;
     }
 
-    emit("cmd", `> ${trimmed.length === 0 ? "" : trimmed}`);
+    if (prompt.mode !== "LOGIN_PASS") emit("cmd", `> ${trimmed}`);
 
     // -----------------------------
     // CAPTCHA prompt handler (SERVER)
@@ -4281,8 +4301,7 @@ export default function Page() {
           emit("ok", `Login success: ${G(tp.username)}`);
           emit("sys", "");
           emit("info", "NEXT");
-          emit("sys", `Next: ${C("user")}`);
-          emit("sys", `Or: ${C("sponsor")}`);
+          emit("sys", `Next: ${C("logout")}`);
         } catch (e) {
           emit("err", "Login error (network or server).");
           emit("info", "NEXT");
@@ -4962,6 +4981,8 @@ export default function Page() {
 
     const base: Record<ConsoleMode, Array<{ label: string; cmd: string }>> = {
       USER: [
+        { label: "Login", cmd: "login" },
+        { label: "Logout", cmd: "logout" },
         { label: "Dig", cmd: "dig" },
         { label: "Allocate USDDD", cmd: "allocate usddd" },
         { label: "Acquire USDDD", cmd: "acquire usddd" },
@@ -5051,7 +5072,7 @@ export default function Page() {
           {lines.map((l) => (
             <div key={l.id} className={`dd-line dd-${l.kind}`}>
               <span className="dd-ts">[{l.t}]</span>
-              <span className="dd-text">{renderSegments(l.text)}</span>
+              <span className="dd-text">{renderSegments(l.text)}{l.migrationNotice && <> Legacy Terminal detonation: 1 January 2027 at 00:00 UTC. If you haven’t enrolled, go to <a href="/#transmission" target="_blank" rel="noopener noreferrer">Explorer enrollment</a>.</>}</span>
             </div>
           ))}
           <div className="dd-cursor" aria-hidden="true">
@@ -5071,7 +5092,7 @@ export default function Page() {
             </div>
 
             <div className="dd-consoles">
-              {(["USER", "SPONSOR", "ADMIN"] as ConsoleMode[]).map((m) => (
+              {(["USER"] as ConsoleMode[]).map((m) => (
                 <button key={m} type="button" className={`dd-chip ${consoleMode === m ? "is-active" : ""}`} onClick={() => switchConsole(m)}>
                   {m}
                 </button>
@@ -5089,7 +5110,7 @@ export default function Page() {
 
         <div className="dd-drawer-body">
           <div className="dd-menu">
-            {(toolboxOpen ? menuItems.toolbox : menuItems.base[consoleMode]).map((it) => (
+            {(toolboxOpen ? menuItems.toolbox : menuItems.base[consoleMode]).filter((item) => isLegacyAuthCommand(item.cmd)).map((it) => (
               <button key={it.label} type="button" className="dd-menu-item" onClick={() => void submitInput(it.cmd)}>
                 {it.label}
               </button>
@@ -5117,9 +5138,10 @@ export default function Page() {
 
         <input
           className="dd-command-input"
+          type={prompt.mode === "LOGIN_PASS" ? "password" : "text"}
           value={cmd}
           onChange={(e) => setCmd(e.target.value)}
-          placeholder={prompt.mode === "IDLE" ? "Type a command - (dig, create box, bind token, deposit, configure)" : "Reply here- (type cancel to abort)"}
+          placeholder={prompt.mode === "IDLE" ? "Type login or logout" : "Reply here- (type cancel to abort)"}
           autoCapitalize="none"
           autoCorrect="off"
           autoComplete="off"
