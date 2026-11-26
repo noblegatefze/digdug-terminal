@@ -133,8 +133,8 @@ const officialEntries: Dispatch[] = [
     id: "zero-phase",
     category: "Migration",
     title: "Legacy Terminal retirement and Explorer enrollment",
-    summary: "Legacy access continues during the transition. The retirement deadline is pending.",
-    body: ["The July 22 capture and the Terminal detonation are part of the Flatverse story. Watch the homepage transmission for the actual retirement date and QR-based Explorer enrollment notice.", "Existing Fund holders can use the Fund Network for position information and receipts. Legacy Terminal Pass recovery remains available through DigsterBot."],
+    summary: "Legacy Terminal registration is closed. The Terminal retires on 1 January 2027 at 00:00 UTC.",
+    body: ["The July 22 capture and the Terminal detonation are part of the Flatverse story. See the homepage for the live countdown and QR-based Explorer enrollment updates.", "Existing Fund holders can use the Fund Network for position information and receipts. Legacy Terminal Pass recovery remains available through DigsterBot."],
     publish_at: "2026-11-26",
     pinned: false,
     art: 8,
@@ -158,6 +158,13 @@ export async function getDispatchPosts() {
     ...post,
     category: post.category === "Release" ? "Releases" : post.category,
   }));
+  const migrationNotice = editorialById.get("zero-phase");
+  for (const post of published) {
+    if (migrationNotice && post.title === migrationNotice.title) {
+      post.summary = migrationNotice.summary;
+      post.body = migrationNotice.body;
+    }
+  }
   const publishedCategories = new Set(published.map((post) => post.category));
   const entries = officialEntries.filter((post) => !publishedCategories.has(post.category));
   return [...published, ...entries, ...lorePosts].sort((a, b) => Date.parse(b.publish_at) - Date.parse(a.publish_at));
