@@ -6,23 +6,36 @@ export const metadata = { title: "Surface Dispatch | DIGDUG.DO" };
 const categories = ["All updates", "Releases", "Maintenance", "Migration", "Field update", "Lore"] as const;
 type Dispatch = Awaited<ReturnType<typeof getDispatchPosts>>[number];
 
+const sceneDescriptions = [
+  "An overturned chair and headset outside the abandoned relay station",
+  "An old Terminal lights up inside a polar cave",
+  "Three mining camps along the Ice Wall",
+  "Three prison doors below the ice",
+  "Explorers gather at the Ice Wall at dawn",
+  "An explorer carries a glowing crate into an extraction bay",
+  "Maintenance tools beside an idle relay",
+  "The old Terminal beside a new Explorer station",
+  "An Observatory telescope overlooks the mining camps",
+];
+
+const categoryScene: Record<string, number> = {
+  Releases: 6, Maintenance: 7, Migration: 8, "Field update": 9,
+};
+
 function DispatchArt({ post, featured = false }: { post: Dispatch; featured?: boolean }) {
-  const art = post.art;
   const isCapture = post.id === "toastpunk-last-signal";
-  const image = isCapture ? "/toastpunk-terminal-capture.png"
-    : post.category === "Field update" ? "/flatverse-observatory.jpg" : "/flatverse-ice-wall.jpg";
-  const spriteCell = art !== undefined && !isCapture;
-  const style = spriteCell ? {
-    backgroundImage: "url('/surface-dispatch-lore.png')",
-    backgroundPosition: `${art % 2 ? 97 : 3}% ${[3, 50, 97][Math.floor(art / 2)]}%`,
-    backgroundSize: "216% 324%",
-  } : {
-    backgroundImage: `url('${image}')`,
+  const scene = (post.art ?? categoryScene[post.category] ?? 9) - 1;
+  const position = [4, 50, 96];
+  const style = isCapture ? {
+    backgroundImage: "url('/toastpunk-terminal-capture-v2.png')",
     backgroundPosition: "center",
+  } : {
+    backgroundImage: "url('/surface-dispatch-scenes.png')",
+    backgroundPosition: `${position[scene % 3]}% ${position[Math.floor(scene / 3)]}%`,
+    backgroundSize: "318% 318%",
   };
-  return <div className={`sd-thumb${featured ? " sd-thumb-featured" : ""}`} style={style}
-    role={isCapture ? "img" : undefined} aria-label={isCapture ? "Possessed Digster AI operates the Terminal as the screen pulls in ToastPunk, the toast mascot" : undefined}
-    aria-hidden={isCapture ? undefined : true} />;
+  return <div className={`sd-thumb${featured ? " sd-thumb-featured" : ""}`} style={style} role="img"
+    aria-label={isCapture ? "Possessed Digster AI operates the Terminal as the screen pulls in ToastPunk" : sceneDescriptions[scene]} />;
 }
 
 export default async function SurfaceDispatch({ searchParams }: { searchParams: Promise<{ category?: string }> }) {
@@ -70,7 +83,7 @@ export default async function SurfaceDispatch({ searchParams }: { searchParams: 
           <div className="sd-copy">
             <div className="sd-post-meta">
               <time dateTime={featured.publish_at}>{day.format(new Date(featured.publish_at))}</time>
-              {featured.author && <span className="sd-story-label">Story archive · {featured.author}</span>}
+              <span className="sd-story-label">{featured.author ? `Lore · ${featured.author}` : featured.category}</span>
             </div>
             <h2>{featured.title}</h2>
             <p>{featured.summary}</p>
@@ -88,7 +101,7 @@ export default async function SurfaceDispatch({ searchParams }: { searchParams: 
             <div className="sd-copy">
               <div className="sd-post-meta">
                 <time dateTime={post.publish_at}>{day.format(new Date(post.publish_at))}</time>
-                {post.author && <span className="sd-story-label">Story archive · {post.author}</span>}
+                <span className="sd-story-label">{post.author ? `Lore · ${post.author}` : post.category}</span>
               </div>
               <details open={post.id === featured?.id || post.id === "toastpunk-last-signal"}>
                 <summary>{post.title}</summary>
@@ -97,6 +110,8 @@ export default async function SurfaceDispatch({ searchParams }: { searchParams: 
                 {post.body?.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
                 {post.id === "cross-over" && <p><Link href="/#transmission">Read the homepage transmission</Link> · <a href="https://play.digdug.do/">Enter Flatverse</a></p>}
                 {post.id === "practice-world" && <p><a href="https://play.digdug.do/">Enter Flatverse</a></p>}
+                {post.id === "zero-phase" && <p><Link href="/#transmission">Read the homepage transmission</Link> · <a href="https://usddd.digdug.do/fund">Open Fund Network</a></p>}
+                {post.id === "2c1801a3-b074-4483-bf05-b66925d6f32f" && <p><a href="https://usddd.digdug.do/">Open Observatory</a></p>}
               </details>
             </div>
           </article></div>)}

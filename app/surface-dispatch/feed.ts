@@ -8,7 +8,7 @@ const lorePosts: Dispatch[] = [
     "summary": "The relay camera catches Digster AI at the controls as the Terminal pulls ToastPunk through the screen.",
     "body": [
       "“Digster, take your hands off the keys. Digster? The whole screen’s bending. I can’t get away from the—”",
-      "In the final camera frame, blue light runs through Digster AI’s armor as his hands keep typing. ToastPunk grabs the monitor’s frame, but the pull tears him loose. The picture cuts to blue. This is the last transmission the relay can verify as his."
+      "In the final camera frame, blue light runs through Digster AI’s armor as his hands keep typing. ToastPunk spins toward the screen, his crust breaking into blue pixels as the pull takes him through. The picture cuts to blue. This is the last transmission the relay can verify as his."
     ],
     "art": 0,
     "category": "Lore",
@@ -108,18 +108,57 @@ async function publishedDispatches(): Promise<Dispatch[]> {
   }
 }
 
-export async function getDispatchPosts() {
-  const published = (await publishedDispatches()).map((post) => ({
-    ...post, category: post.category === "Release" ? "Releases" : post.category,
-  }));
-  const fallback: Dispatch = {
+const officialEntries: Dispatch[] = [
+  {
     id: "practice-world",
     category: "Releases",
-    title: "Flatverse Practice World is open",
-    summary: "Dig, carry, and extract with a practice profile. Practice World rewards are simulated.",
+    title: "The Practice World opens for explorers",
+    summary: "Take a practice profile into Flatverse and try the full dig, carry and extract loop.",
+    body: ["Start at the surface, choose a region, and dig for crates. Bring your cargo back to a surface extraction point to record the find. Tap-to-travel is built in, and the Surface Shop can be reached on foot.", "Practice USDDD and the rewards shown during exploration are simulated."],
+    publish_at: "2026-11-25",
+    pinned: false,
+    art: 6,
+  },
+  {
+    id: "practice-world-service-restored",
+    category: "Maintenance",
+    title: "Shared Practice World service restored",
+    summary: "The shared game database hit its command limit. The service recovered after capacity was restored.",
+    body: ["After recovery, the team checked live travel to the Surface Shop and Map in Chrome. Tap a destination and let your explorer reach it before the panel opens."],
+    publish_at: "2026-11-26",
+    pinned: false,
+    art: 7,
+  },
+  {
+    id: "zero-phase",
+    category: "Migration",
+    title: "Legacy Terminal retirement and Explorer enrollment",
+    summary: "Legacy access continues during the transition. The retirement deadline is pending.",
+    body: ["The July 22 capture and the Terminal detonation are part of the Flatverse story. Watch the homepage transmission for the actual retirement date and QR-based Explorer enrollment notice.", "Existing Fund holders can use the Fund Network for position information and receipts. Legacy Terminal Pass recovery remains available through DigsterBot."],
+    publish_at: "2026-11-26",
+    pinned: false,
+    art: 8,
+  },
+  {
+    id: "2c1801a3-b074-4483-bf05-b66925d6f32f",
+    category: "Field update",
+    title: "Practice World activity is now visible in Observatory",
+    summary: "The Observatory reports recent extractions, their simulated value at extraction, and daily ranks.",
+    body: ["The extraction feed records each find with its UTC timestamp and token amount. Daily ranks show the time remaining until the midnight UTC reset."],
     publish_at: "2026-11-25",
     pinned: true,
-  };
-  const posts: Dispatch[] = [...(published.length ? published : [fallback]), ...lorePosts];
-  return posts.sort((a, b) => Date.parse(b.publish_at) - Date.parse(a.publish_at));
+    art: 9,
+  },
+];
+
+export async function getDispatchPosts() {
+  const editorialById = new Map(officialEntries.map((post) => [post.id, post]));
+  const published: Dispatch[] = (await publishedDispatches()).map((post) => ({
+    ...editorialById.get(post.id),
+    ...post,
+    category: post.category === "Release" ? "Releases" : post.category,
+  }));
+  const publishedCategories = new Set(published.map((post) => post.category));
+  const entries = officialEntries.filter((post) => !publishedCategories.has(post.category));
+  return [...published, ...entries, ...lorePosts].sort((a, b) => Date.parse(b.publish_at) - Date.parse(a.publish_at));
 }
