@@ -25,7 +25,7 @@ import { DISPLAY_VERSION } from "@/app/lib/build";
 type ConsoleMode = "USER" | "SPONSOR" | "ADMIN";
 type LineKind = "sys" | "info" | "ok" | "warn" | "err" | "cmd";
 
-type TermLine = { id: string; t: string; console?: ConsoleMode; kind: LineKind; text: string; migrationNotice?: boolean };
+type TermLine = { id: string; t: string; console?: ConsoleMode; kind: LineKind; text: string; migrationNotice?: boolean; flatverseLink?: boolean };
 
 type PromptMode =
   | "IDLE"
@@ -1328,9 +1328,9 @@ export default function Page() {
   useEffect(() => void (claimsRef.current = claims), [claims]);
   useEffect(() => void (digGateRef.current = digGate), [digGate]);
 
-  const emit = (kind: LineKind, text: string, migrationNotice = false) => {
+  const emit = (kind: LineKind, text: string, migrationNotice = false, flatverseLink = false) => {
     const c = consoleModeRef.current;
-    setLines((prev) => [...prev, { id: uid("l"), t: nowTs(), console: c, kind, text, migrationNotice }]);
+    setLines((prev) => [...prev, { id: uid("l"), t: nowTs(), console: c, kind, text, migrationNotice, flatverseLink }]);
   };
 
   function hardRefresh() {
@@ -4299,6 +4299,17 @@ export default function Page() {
           setTerminalPass(tp);
 
           emit("ok", `Login success: ${G(tp.username)}`);
+          if (data.migration === "migrated") {
+            emit("ok", "You’ve already migrated to Flatverse. You no longer need to return to the Legacy Terminal.", false, true);
+          } else if (data.migration === "pending") {
+            if (data.legacyBadge) {
+              emit("info", `Your enrollment reward: ${data.legacyBadge}. You qualify to claim it when you complete Explorer enrollment.`, true);
+            } else {
+              emit("warn", "Your badge eligibility is temporarily unavailable.", true);
+            }
+          } else {
+            emit("warn", "We couldn’t check your Flatverse migration status. Try signing in again later.");
+          }
           emit("sys", "");
           emit("info", "NEXT");
           emit("sys", `Next: ${C("logout")}`);
@@ -5072,7 +5083,7 @@ export default function Page() {
           {lines.map((l) => (
             <div key={l.id} className={`dd-line dd-${l.kind}`}>
               <span className="dd-ts">[{l.t}]</span>
-              <span className="dd-text">{renderSegments(l.text)}{l.migrationNotice && <> Legacy Terminal detonation: 1 January 2027 at 00:00 UTC. If you haven’t enrolled, go to <a href="/#transmission" target="_blank" rel="noopener noreferrer">Explorer enrollment</a>.</>}</span>
+              <span className="dd-text">{renderSegments(l.text)}{l.migrationNotice && <> Legacy Terminal detonation: 1 January 2027 at 00:00 UTC. If you haven’t enrolled, go to <a href="/#transmission" target="_blank" rel="noopener noreferrer">Explorer enrollment</a>.</>}{l.flatverseLink && <> <a href="https://play.digdug.do/" target="_blank" rel="noopener noreferrer">Go to Flatverse</a>.</>}</span>
             </div>
           ))}
           <div className="dd-cursor" aria-hidden="true">
