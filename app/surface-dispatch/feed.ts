@@ -197,7 +197,7 @@ export async function getDispatchPosts() {
   const publishedCategories = new Set(published.map((post) => post.category));
   const entries = officialEntries.filter((post) => !publishedCategories.has(post.category));
   const editsById = new Map(edits.map(edit => [edit.post_id, edit]));
-  const posts: Dispatch[] = [...published, ...entries, ...lorePosts].map(post => {
+  const posts: Dispatch[] = [...published, ...entries, ...lorePosts].map<Dispatch>(post => {
     const edit = editsById.get(post.id);
     if (!edit) return { ...post, pinScope: post.pinned ? "main" : "none", pinAt: post.publish_at };
     return {
