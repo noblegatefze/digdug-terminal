@@ -35,6 +35,8 @@ async function kickUser(chatId: string, tgUserId: number) {
 }
 
 export async function GET() {
+  if (process.env.DIGSTER_CHARACTER_MODE === "1") return NextResponse.json({ ok: true, skipped: "digster_character_mode" });
+
   const nowIso = new Date().toISOString();
 
   // 1) Fetch expired, still-pending joins
