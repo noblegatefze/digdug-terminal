@@ -91,7 +91,7 @@ const lorePosts: Dispatch[] = [
   }
 ];
 
-type Dispatch = { id: string; title: string; category: string; summary: string; publish_at: string; pinned: boolean; author?: string; body?: string[]; source?: string; art?: number };
+type Dispatch = { id: string; title: string; category: string; summary: string; publish_at: string; pinned: boolean; author?: string; body?: string[]; source?: string; art?: number; adminManaged?: boolean };
 export const day = new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeZone: "UTC" });
 
 async function publishedDispatches(): Promise<Dispatch[]> {
@@ -170,6 +170,7 @@ export async function getDispatchPosts() {
     ...post,
     summary: useOrbNames(post.summary),
     body: post.body?.map(useOrbNames),
+    adminManaged: true,
     category: post.category === "Release" ? "Releases" : post.category,
   }));
   const migrationNotice = editorialById.get("zero-phase");

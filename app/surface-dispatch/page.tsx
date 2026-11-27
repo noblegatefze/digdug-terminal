@@ -1,42 +1,18 @@
 import Link from "next/link";
 import Script from "next/script";
 import { day, getDispatchPosts } from "./feed";
+import { dispatchArtwork } from "./artwork";
 
 export const metadata = { title: "Surface Dispatch | DIGDUG.DO" };
 
 const categories = ["All updates", "Releases", "Maintenance", "Migration", "Field update", "Lore"] as const;
 type Dispatch = Awaited<ReturnType<typeof getDispatchPosts>>[number];
 
-const sceneDescriptions = [
-  "An overturned chair and headset inside the abandoned relay station",
-  "An old Terminal lights up inside a polar cave",
-  "Three mining camps along the Ice Wall",
-  "Three prison doors below the ice",
-  "Explorers gather at the Ice Wall at dawn",
-  "An explorer carries glowing cargo into an extraction bay",
-  "Maintenance tools beside an idle relay",
-  "The old Terminal beside a new Explorer station",
-  "An Observatory telescope overlooks the mining camps",
-];
-
-const categoryScene: Record<string, number> = {
-  Releases: 6, Maintenance: 7, Migration: 8, "Field update": 9,
-};
-
 function DispatchArt({ post, featured = false }: { post: Dispatch; featured?: boolean }) {
-  const isCapture = post.id === "toastpunk-last-signal";
-  const scene = (post.art ?? categoryScene[post.category] ?? 9) - 1;
-  const position = [1, 50, 99];
-  const style = isCapture ? {
-    backgroundImage: "url('/toastpunk-terminal-prison.png')",
-    backgroundPosition: "center",
-  } : {
-    backgroundImage: "url('/surface-dispatch-illustrations.png')",
-    backgroundPosition: `${position[scene % 3]}% ${position[Math.floor(scene / 3)]}%`,
-    backgroundSize: "318% 318%",
-  };
-  return <div className={`sd-thumb${featured ? " sd-thumb-featured" : ""}`} style={style} role="img"
-    aria-label={isCapture ? "ToastPunk is pulled through the Terminal screen toward the barred prison inside the Ice Wall" : sceneDescriptions[scene]} />;
+  const artwork = dispatchArtwork(post);
+  return <div className={`sd-thumb${featured ? " sd-thumb-featured" : ""}`}
+    style={{backgroundImage: `url('${artwork.path}')`, backgroundPosition: artwork.position, backgroundSize: artwork.size}}
+    role="img" aria-label={artwork.alt} />;
 }
 
 export default async function SurfaceDispatch({ searchParams }: { searchParams: Promise<{ category?: string }> }) {
