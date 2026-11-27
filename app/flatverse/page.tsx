@@ -1,9 +1,40 @@
+import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import Script from "next/script";
 import { day, getDispatchPosts } from "../surface-dispatch/feed";
 
-export const metadata = { title: "DIGDUG.DO | Enter Flatverse" };
+export const metadata: Metadata = {
+  "title": "DIGDUG.DO | Enter Flatverse",
+  "description": "Explore the world beyond the Ice Wall, meet the four Explorer Guides, and dig for buried finds in Flatverse Testnet.",
+  "alternates": {
+    "canonical": "https://www.digdug.do/"
+  },
+  "openGraph": {
+    "title": "DIGDUG.DO | Enter Flatverse",
+    "description": "Explore the world beyond the Ice Wall, meet the four Explorer Guides, and dig for buried finds in Flatverse Testnet.",
+    "url": "https://www.digdug.do/",
+    "siteName": "DIGDUG.DO",
+    "type": "website",
+    "images": [
+      {
+        "url": "https://www.digdug.do/flatverse-ice-wall.jpg",
+        "alt": "The frozen frontier beyond the Ice Wall"
+      }
+    ]
+  },
+  "twitter": {
+    "card": "summary_large_image",
+    "title": "DIGDUG.DO | Enter Flatverse",
+    "description": "Explore the world beyond the Ice Wall, meet the four Explorer Guides, and dig for buried finds in Flatverse Testnet.",
+    "images": [
+      {
+        "url": "https://www.digdug.do/flatverse-ice-wall.jpg",
+        "alt": "The frozen frontier beyond the Ice Wall"
+      }
+    ]
+  }
+};
 
 const pancakeSwapUrl = "https://pancake.xyz/swap?inputCurrency=0x55d398326f99059fF775485246999027B3197955&outputCurrency=0x03f65216F340bAC39c8d1911288B1c7CA071e9c3&chain=bsc";
 
