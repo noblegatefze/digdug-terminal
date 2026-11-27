@@ -3,7 +3,7 @@ import { getDispatchPosts } from "../../surface-dispatch/feed";
 
 export async function GET() {
   const posts = (await getDispatchPosts()).map(({ id, title, category, summary, body, links, publish_at, pinned, pinScope, art, adminManaged, photo, photoAlt }) => ({
-    id, title, summary, body, category, publish_at, pinned, pinScope, photo, photoAlt, adminManaged: adminManaged === true,
+    id, title, summary, body, links, category, publish_at, pinned, pinScope, photo, photoAlt, adminManaged: adminManaged === true,
     artwork: dispatchArtwork({ id, category, art, photo, photoAlt }),
   }));
   const artworkByCategory = Object.fromEntries(["Release", "Maintenance", "Migration", "Field update"].map(category =>
