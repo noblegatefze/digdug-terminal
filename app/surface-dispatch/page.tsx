@@ -13,7 +13,7 @@ const sceneDescriptions = [
   "Three mining camps along the Ice Wall",
   "Three prison doors below the ice",
   "Explorers gather at the Ice Wall at dawn",
-  "An explorer carries a glowing crate into an extraction bay",
+  "An explorer carries glowing cargo into an extraction bay",
   "Maintenance tools beside an idle relay",
   "The old Terminal beside a new Explorer station",
   "An Observatory telescope overlooks the mining camps",

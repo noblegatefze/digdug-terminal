@@ -108,7 +108,7 @@ export default async function FlatverseHome() {
             <div className="fv-art"><Image src="/flatverse-ice-wall.jpg" alt="" fill priority sizes="(max-width: 760px) 100vw, 62vw" style={{ objectFit: "cover", objectPosition: "65% 42%" }} /></div>
             <div className="fv-copy">
               <h1>Enter <span>Flatverse</span></h1>
-              <p>Dig beyond the Ice Wall and bring buried finds back to the surface.</p>
+              <p>Dig beyond the Ice Wall and bring buried Blue Orbs back to the surface.</p>
               <a className="fv-action" href="https://play.digdug.do/">Enter Flatverse</a>
               <p className="fv-tag">Practice World · Simulated rewards</p>
             </div>
@@ -142,7 +142,7 @@ export default async function FlatverseHome() {
         <details className="fv-note" id="transmission" open>
           <summary>The Last Terminal Transmission</summary>
           <p>For months, ToastPunk’s X account stayed silent. The original founder had been captured. When a digger entered an encrypted command in the Legacy Terminal, the intelligence behind the Ice Wall used it to infiltrate the DIGDUG.DO and USDDD systems in the world of Flatverse.</p>
-          <p>The new controllers opened three regions along the Ice Wall and revealed where the real treasure was buried. Take tools underground, extract hidden crates, and use the Observatory to see what other explorers are bringing to the surface. The map above ground tells only part of the story. Cross over as an explorer to find out what lies below.</p>
+          <p>The new controllers opened three regions along the Ice Wall and revealed where the real treasure was buried. Take tools underground, extract Blue Orbs, and use the Observatory to see what other explorers are bringing to the surface. The map above ground tells only part of the story. Cross over as an explorer to find out what lies below.</p>
           <p>In the story, the Legacy Terminal is set to detonate. Existing diggers will move to QR-based Explorer enrollment when the migration opens. Legacy Terminal registration is closed. The Terminal retirement deadline is 1 January 2027 at 00:00 UTC.</p>
         </details>
         <section className="fv-note" id="explorer-guides">
