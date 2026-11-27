@@ -91,7 +91,8 @@ const lorePosts: Dispatch[] = [
   }
 ];
 
-type Dispatch = { id: string; title: string; category: string; summary: string; publish_at: string; pinned: boolean; author?: string; body?: string[]; source?: string; art?: number; adminManaged?: boolean; photo?: string | null; photoAlt?: string | null; pinScope?: "none" | "main" | "category"; pinAt?: string };
+type FooterLink = { title: string; url: string };
+type Dispatch = { links?: FooterLink[]; id: string; title: string; category: string; summary: string; publish_at: string; pinned: boolean; author?: string; body?: string[]; source?: string; art?: number; adminManaged?: boolean; photo?: string | null; photoAlt?: string | null; pinScope?: "none" | "main" | "category"; pinAt?: string };
 export const day = new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeZone: "UTC" });
 
 async function publishedDispatches(): Promise<Dispatch[]> {
@@ -176,8 +177,28 @@ async function publicEditions(): Promise<Edition[]> {
   } catch { return []; }
 }
 
+const homeTransmission = { title: "Read the homepage transmission", url: "https://www.digdug.do/#transmission" };
+const playLink = { title: "Enter Flatverse", url: "https://play.digdug.do/" };
+const defaultFooterLinks: Record<string, FooterLink[]> = {
+  "cross-over": [homeTransmission, playLink],
+  "practice-world": [playLink],
+  "zero-phase": [homeTransmission, { title: "Open Fund Network", url: "https://fund.digdug.do/" }],
+  "2c1801a3-b074-4483-bf05-b66925d6f32f": [{ title: "Open Observatory", url: "https://usddd.digdug.do/" }],
+};
+
+async function publicFooters(): Promise<{ post_id: string; links: FooterLink[]; deleted: boolean }[]> {
+  const origin = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY;
+  if (!origin || !key) return [];
+  const response = await fetch(new URL("/rest/v1/rpc/surface_dispatch_public_footer", origin), {
+    headers: { apikey: key }, cache: "no-store", signal: AbortSignal.timeout(3500),
+  });
+  if (!response.ok) throw new Error("Surface Dispatch footers are unavailable");
+  return response.json();
+}
+
 export async function getDispatchPosts() {
-  const [publishedRows, edits] = await Promise.all([publishedDispatches(), publicEditions()]);
+  const [publishedRows, edits, footers] = await Promise.all([publishedDispatches(), publicEditions(), publicFooters()]);
   const editorialById = new Map(officialEntries.map((post) => [post.id, post]));
   const published: Dispatch[] = publishedRows.map((post) => ({
     ...editorialById.get(post.id),
@@ -210,12 +231,14 @@ export async function getDispatchPosts() {
     };
   }).sort((a, b) => Date.parse(b.publish_at) - Date.parse(a.publish_at));
 
+  const footerById = new Map(footers.map(footer => [footer.post_id, footer]));
+  const visiblePosts = posts.filter(post => !footerById.get(post.id)?.deleted);
   const winners = new Map<string, Dispatch>();
-  for (const post of posts) {
+  for (const post of visiblePosts) {
     if (!post.pinScope || post.pinScope === "none") continue;
     const scope = post.pinScope === "main" ? "main" : post.category;
     const current = winners.get(scope);
     if (!current || Date.parse(post.pinAt ?? post.publish_at) > Date.parse(current.pinAt ?? current.publish_at)) winners.set(scope, post);
   }
-  return posts.map(post => ({ ...post, pinned: [...winners.values()].some(winner => winner.id === post.id) }));
+  return visiblePosts.map(post => ({ ...post, links: footerById.get(post.id)?.links ?? defaultFooterLinks[post.id] ?? [], pinned: [...winners.values()].some(winner => winner.id === post.id) }));
 }
