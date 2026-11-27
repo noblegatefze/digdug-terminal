@@ -11,7 +11,7 @@ const lorePosts: Dispatch[] = [
       "The relay camera catches ToastPunk sliding toward the glass in a stream of blue light and ice fragments. Beyond the glass, an amber lamp burns behind iron bars set deep into the Ice Wall. The picture cuts to blue as ToastPunk reaches the screen. This is the last transmission the relay can verify as his."
     ],
     "art": 0,
-    "category": "Lore",
+    "category": "Field update",
     "pinned": false
   },
   {
@@ -26,7 +26,7 @@ const lorePosts: Dispatch[] = [
       "The crew seals the room and saves the command with the rest of the evidence. The voice buffer places Digster at the controls. His input log shows keystrokes arriving before the microphone picks up his hands on the keys."
     ],
     "art": 1,
-    "category": "Lore",
+    "category": "Field update",
     "pinned": false
   },
   {
@@ -41,7 +41,7 @@ const lorePosts: Dispatch[] = [
       "Before the line goes dead, Axiom repeats the same three coordinates marked in ToastPunk’s notebook."
     ],
     "art": 2,
-    "category": "Lore",
+    "category": "Field update",
     "pinned": false
   },
   {
@@ -56,7 +56,7 @@ const lorePosts: Dispatch[] = [
       "The first crews set up three camps along the Ice Wall. Their reports agree on one thing. Below the camps, the tunnels keep changing."
     ],
     "art": 3,
-    "category": "Lore",
+    "category": "Field update",
     "pinned": false
   },
   {
@@ -71,7 +71,7 @@ const lorePosts: Dispatch[] = [
       "Flint’s footage shows three barred doors cut into the ice, each lit by an amber lamp. Mira’s clearest signal comes from behind one of those doors. Someone inside is tapping the same rhythm ToastPunk recorded in July."
     ],
     "art": 4,
-    "category": "Lore",
+    "category": "Field update",
     "pinned": false
   },
   {
@@ -86,7 +86,7 @@ const lorePosts: Dispatch[] = [
       "The Terminal’s detonation is part of the Flatverse story. The homepage carries the real retirement schedule and Explorer enrollment updates."
     ],
     "art": 5,
-    "category": "Lore",
+    "category": "Migration",
     "pinned": false
   }
 ];
