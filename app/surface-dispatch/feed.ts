@@ -91,7 +91,7 @@ const lorePosts: Dispatch[] = [
   }
 ];
 
-type Dispatch = { id: string; title: string; category: string; summary: string; publish_at: string; pinned: boolean; author?: string; body?: string[]; source?: string; art?: number; adminManaged?: boolean };
+type Dispatch = { id: string; title: string; category: string; summary: string; publish_at: string; pinned: boolean; author?: string; body?: string[]; source?: string; art?: number; adminManaged?: boolean; photo?: string | null; photoAlt?: string | null; pinScope?: "none" | "main" | "category"; pinAt?: string };
 export const day = new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeZone: "UTC" });
 
 async function publishedDispatches(): Promise<Dispatch[]> {
@@ -163,9 +163,23 @@ function useOrbNames(text: string) {
   });
 }
 
+type Edition = {post_id: string; title: string; summary: string; category: string; photo: string | null; photo_alt: string | null; body: string | null; pin_scope: "none" | "main" | "category"; updated_at: string};
+async function publicEditions(): Promise<Edition[]> {
+  const origin = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY;
+  if (!origin || !key) return [];
+  try {
+    const response = await fetch(new URL("/rest/v1/rpc/surface_dispatch_public_editions", origin), {
+      headers: { apikey: key }, next: { revalidate: 15 }, signal: AbortSignal.timeout(3000),
+    });
+    return response.ok ? await response.json() : [];
+  } catch { return []; }
+}
+
 export async function getDispatchPosts() {
+  const [publishedRows, edits] = await Promise.all([publishedDispatches(), publicEditions()]);
   const editorialById = new Map(officialEntries.map((post) => [post.id, post]));
-  const published: Dispatch[] = (await publishedDispatches()).map((post) => ({
+  const published: Dispatch[] = publishedRows.map((post) => ({
     ...editorialById.get(post.id),
     ...post,
     summary: useOrbNames(post.summary),
@@ -182,5 +196,26 @@ export async function getDispatchPosts() {
   }
   const publishedCategories = new Set(published.map((post) => post.category));
   const entries = officialEntries.filter((post) => !publishedCategories.has(post.category));
-  return [...published, ...entries, ...lorePosts].sort((a, b) => Date.parse(b.publish_at) - Date.parse(a.publish_at));
+  const editsById = new Map(edits.map(edit => [edit.post_id, edit]));
+  const posts: Dispatch[] = [...published, ...entries, ...lorePosts].map(post => {
+    const edit = editsById.get(post.id);
+    if (!edit) return { ...post, pinScope: post.pinned ? "main" : "none", pinAt: post.publish_at };
+    return {
+      ...post, title: edit.title, summary: edit.summary,
+      category: edit.category === "Release" ? "Releases" : edit.category,
+      body: edit.body === null ? post.body : edit.body.split(/\n\s*\n/).filter(Boolean),
+      photo: edit.photo, photoAlt: edit.photo_alt, pinScope: edit.pin_scope,
+      pinAt: Date.parse(edit.updated_at) > Date.parse(post.publish_at) ? edit.updated_at : post.publish_at,
+      pinned: false,
+    };
+  }).sort((a, b) => Date.parse(b.publish_at) - Date.parse(a.publish_at));
+
+  const winners = new Map<string, Dispatch>();
+  for (const post of posts) {
+    if (!post.pinScope || post.pinScope === "none") continue;
+    const scope = post.pinScope === "main" ? "main" : post.category;
+    const current = winners.get(scope);
+    if (!current || Date.parse(post.pinAt ?? post.publish_at) > Date.parse(current.pinAt ?? current.publish_at)) winners.set(scope, post);
+  }
+  return posts.map(post => ({ ...post, pinned: [...winners.values()].some(winner => winner.id === post.id) }));
 }
