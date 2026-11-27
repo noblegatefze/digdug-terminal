@@ -2,14 +2,16 @@ import { dispatchArtwork } from "../../surface-dispatch/artwork";
 import { getDispatchPosts } from "../../surface-dispatch/feed";
 
 export async function GET() {
-  const posts = (await getDispatchPosts()).map(({ id, title, category, publish_at, pinned, art, adminManaged }) => ({
-    id, title, category, publish_at, pinned, adminManaged: adminManaged === true,
-    artwork: dispatchArtwork({ id, category, art }),
+  const posts = (await getDispatchPosts()).map(({ id, title, category, summary, body, publish_at, pinned, pinScope, art, adminManaged, photo, photoAlt }) => ({
+    id, title, summary, body, category, publish_at, pinned, pinScope, photo, photoAlt, adminManaged: adminManaged === true,
+    artwork: dispatchArtwork({ id, category, art, photo, photoAlt }),
   }));
   const artworkByCategory = Object.fromEntries(["Release", "Maintenance", "Migration", "Field update"].map(category =>
     [category, dispatchArtwork({ category })]
   ));
-  return Response.json({ posts, artworkByCategory }, {
+  const photoLibrary = Array.from({ length: 9 }, (_, i) => dispatchArtwork({ category: "", art: i + 1 }));
+  photoLibrary.unshift(dispatchArtwork({ id: "toastpunk-last-signal", category: "" }));
+  return Response.json({ posts, artworkByCategory, photoLibrary }, {
     headers: { "Cache-Control": "public, max-age=0, s-maxage=15" },
   });
 }

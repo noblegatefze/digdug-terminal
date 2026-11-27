@@ -11,7 +11,7 @@ type Dispatch = Awaited<ReturnType<typeof getDispatchPosts>>[number];
 function DispatchArt({ post, featured = false }: { post: Dispatch; featured?: boolean }) {
   const artwork = dispatchArtwork(post);
   return <div className={`sd-thumb${featured ? " sd-thumb-featured" : ""}`}
-    style={{backgroundImage: `url('${artwork.path}')`, backgroundPosition: artwork.position, backgroundSize: artwork.size}}
+    style={{backgroundImage: `url(${JSON.stringify(artwork.path)})`, backgroundPosition: artwork.position, backgroundSize: artwork.size}}
     role="img" aria-label={artwork.alt} />;
 }
 
@@ -20,7 +20,7 @@ export default async function SurfaceDispatch({ searchParams }: { searchParams: 
   const selected = categories.find((item) => item.toLowerCase() === category) ?? categories[0];
   const posts = await getDispatchPosts();
   const visible = selected === "All updates" ? posts : posts.filter(post => post.category === selected);
-  const featured = visible.find(post => post.pinned) ?? visible[0];
+  const featured = visible.find(post => post.pinned && post.pinScope === (selected === "All updates" ? "main" : "category")) ?? visible[0];
   return (
     <main className="sd">
       <style>{"\n.sd{min-height:100vh;background:#04111e;color:#f6fbff;font:16px/1.4 Arial,Helvetica,sans-serif;padding:18px clamp(12px,3vw,48px) 42px}.sd *{box-sizing:border-box}.sd a{color:inherit;text-decoration:none}.sd a:hover{text-decoration:underline}.sd a:focus-visible,.sd summary:focus-visible{outline:3px solid #ffc624;outline-offset:3px}.sd-shell{max-width:1350px;margin:auto}.sd-head,.sd-hero,.sd-feature,.sd-filters,.sd-post,.sd-empty{border:1px solid #37dcec;border-radius:7px;background:#061c2d}.sd-head,.sd-nav{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.sd-head{padding:11px 17px}.sd-brand{font-size:clamp(22px,3vw,34px);font-weight:900;letter-spacing:-.05em}.sd-nav{font-size:14px;font-weight:700}.sd .sd-gold{display:inline-block;text-align:center;border:1px solid #ffe188;border-radius:6px;background:linear-gradient(#ffdb51,#ffb400);color:#08121d;padding:7px 12px;font-weight:900}.sd-hero{margin-top:10px;min-height:clamp(200px,26vw,320px);padding:clamp(15px,3vw,38px);display:flex;justify-content:center;flex-direction:column;background:linear-gradient(90deg,#031222ef,#0312226e 53%,transparent 77%),url('/surface-dispatch-relay.png') 72% 63%/cover no-repeat #071a2f}.sd h1,.sd h2,.sd p{margin:0}.sd h1{font-size:clamp(38px,6vw,75px);font-weight:900;letter-spacing:-.055em;line-height:.98}.sd h1 span{color:#ffc624}.sd-hero p{max-width:34ch;margin-top:9px;color:#dbebf6}.sd-feature{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.35fr);gap:20px;margin:12px 0;padding:14px;align-items:center}.sd-thumb{aspect-ratio:2.5;border-radius:5px;background:url('/flatverse-ice-wall.jpg') 2% 91%/170% auto no-repeat #071a2f;position:relative}.sd-thumb span{position:absolute;top:7px;left:7px;color:#08121d;background:#ffc624;border-radius:4px;padding:3px 8px;font-weight:900;font-size:12px}.sd-copy{min-width:0}.sd time{display:block;font-size:13px;color:#a8d6e6}.sd h2{font-size:clamp(22px,3vw,38px);font-weight:850;line-height:1.07;letter-spacing:-.035em}.sd-feature h2{margin:5px 0}.sd-feature p,.sd-post p{color:#d2e7f2}.sd-feature .sd-gold{margin-top:10px}.sd-filters{display:flex;overflow:hidden;margin:12px 0}.sd-filters a{flex:1;text-align:center;padding:8px 5px;font-weight:800;font-size:14px}.sd-filters a+a{border-left:1px solid #1e8199}.sd-filters a[aria-current]{color:#07121b;background:#ffc624}.sd-post,.sd-empty{margin-top:9px;padding:13px}.sd-post summary{cursor:pointer;font-weight:850;font-size:clamp(17px,2.3vw,26px)}.sd-post p{margin-top:8px}.sd-post a{color:#93f3ff;text-decoration:underline}.sd-empty{color:#d2e7f2}.sd-post:target{outline:2px solid #ffc624;outline-offset:2px}\n@media(max-width:760px){.sd{padding:9px 10px 26px}.sd-head{padding:8px 10px}.sd-nav{font-size:12px;gap:7px}.sd-hero{min-height:174px;background-position:72% 63%;justify-content:flex-end}.sd-hero h1{font-size:clamp(33px,8.5vw,48px)}.sd-hero p{font-size:13px}.sd-feature{grid-template-columns:1fr;gap:8px;padding:10px}.sd-feature .sd-gold{width:100%}.sd-filters a{font-size:11px}.sd-post{padding:9px}}\n"}</style>
@@ -60,7 +60,7 @@ export default async function SurfaceDispatch({ searchParams }: { searchParams: 
           <div className="sd-copy">
             <div className="sd-post-meta">
               <time dateTime={featured.publish_at}>{day.format(new Date(featured.publish_at))}</time>
-              <span className="sd-story-label">{featured.category}{featured.author ? " · " + featured.author : ""}{featured.pinned ? " · Pinned" : ""}</span>
+              <span className="sd-story-label">{featured.category}{featured.author ? " · " + featured.author : ""}{featured.pinned ? featured.pinScope === "main" ? " · Pinned on All updates" : " · Pinned in category" : ""}</span>
             </div>
             <h2>{featured.title}</h2>
             <p>{featured.summary}</p>
