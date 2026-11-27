@@ -106,6 +106,8 @@ function buildTgMessage(p: {
 }
 
 export async function GET() {
+  if (process.env.DIGSTER_CHARACTER_MODE === "1") return NextResponse.json({ ok: true, skipped: "digster_character_mode" });
+
   const ADMIN_KEY = process.env.ADMIN_API_KEY;
   if (!ADMIN_KEY) {
     return NextResponse.json({ ok: false, error: "ADMIN_API_KEY not set" }, { status: 500 });

@@ -703,6 +703,43 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const update = await req.json();
 
+  if (process.env.DIGSTER_CHARACTER_MODE === "1") {
+    const secret = process.env.DIGSTER_WEBHOOK_SECRET;
+    const suppliedSecret = req.headers.get("x-telegram-bot-api-secret-token");
+    if (!secret || !suppliedSecret || Buffer.byteLength(suppliedSecret) !== Buffer.byteLength(secret) ||
+        !crypto.timingSafeEqual(Buffer.from(suppliedSecret), Buffer.from(secret))) {
+      return new NextResponse(null, { status: 401 });
+    }
+
+    const message = update?.message;
+    const chat = message?.chat;
+    const text = getText(update);
+    if (message?.from?.is_bot !== false) return NextResponse.json({ ok: true });
+
+    if (chat?.type === "private" && /^(?:\/verify|\/recover)$/i.test(text)) {
+      await handleUpdate(update);
+    }
+
+    if (chat?.type === "supergroup" && TG_GROUP_CHAT_ID && chat.id === TG_GROUP_CHAT_ID &&
+        Number.isSafeInteger(message.message_id) && message.message_id > 0 &&
+        text.toLowerCase() === "/grumble@digsterbot") {
+      const grumbles = [
+        "I leave the tunnels for five minutes and you lot rename the whole world. What did I miss?",
+        "The old Terminal had one screen and that was plenty. What do you actually like about the new gear?",
+        "Everyone talks about Golden Cubes. Nobody tells me what their first extraction was like. How did yours go?",
+      ];
+      return NextResponse.json({
+        method: "sendMessage",
+        chat_id: chat.id,
+        text: grumbles[message.message_id % grumbles.length],
+        reply_parameters: { message_id: message.message_id },
+        ...(message.is_topic_message ? { message_thread_id: message.message_thread_id } : {}),
+      });
+    }
+
+    return NextResponse.json({ ok: true });
+  }
+
   // Priority commands must run inline (Vercel may kill background work)
   const text = getText(update);
   const isPriorityCmd = /^\/(paid|claim|verify|usdt|ask|ping|chatid|start|help)(@|\b)/i.test(text);
@@ -736,9 +773,11 @@ async function handleUpdate(update: any) {
   }
 
   // Opportunistic sweeps (no cron required)
-  await maybeAutoUnrestrictVerified();
-  await maybeSendGraceExpiryReminders();
-  await maybeEnforceGraceExpiry();
+  if (!(process.env.DIGSTER_CHARACTER_MODE === "1")) {
+    await maybeAutoUnrestrictVerified();
+    await maybeSendGraceExpiryReminders();
+    await maybeEnforceGraceExpiry();
+  }
 
   const text = getText(update);
   const chat = getChat(update);

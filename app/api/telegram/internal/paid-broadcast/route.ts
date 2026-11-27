@@ -128,6 +128,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
     }
 
+    if (process.env.DIGSTER_CHARACTER_MODE === "1") {
+      return NextResponse.json({ ok: false, error: "digster_character_mode" }, { status: 409 });
+    }
+
     const claimCode = String(body.claim_code ?? "").trim().toUpperCase();
     const txIn = String(body.tx ?? "").trim();
 

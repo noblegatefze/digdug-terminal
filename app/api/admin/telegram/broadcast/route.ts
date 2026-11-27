@@ -110,6 +110,10 @@ export async function POST(req: NextRequest) {
   // mode: "dry_run" (default) or "send"
   const mode: "dry_run" | "send" = body.mode === "send" ? "send" : "dry_run";
 
+  if (mode === "send" && process.env.DIGSTER_CHARACTER_MODE === "1") {
+    return NextResponse.json({ ok: false, error: "digster_character_mode" }, { status: 409 });
+  }
+
   // message required for send mode; optional for dry-run
   const message: string = typeof body.message === "string" ? body.message : "";
 
