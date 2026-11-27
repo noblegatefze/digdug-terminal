@@ -1,9 +1,40 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import Script from "next/script";
 import { day, getDispatchPosts } from "./feed";
 import { dispatchArtwork } from "./artwork";
 
-export const metadata = { title: "Surface Dispatch | DIGDUG.DO" };
+export const metadata: Metadata = {
+  "title": "Surface Dispatch | DIGDUG.DO",
+  "description": "Read Flatverse field reports, release updates, and the story of ToastPunk’s last transmission from beyond the Ice Wall.",
+  "alternates": {
+    "canonical": "https://feed.digdug.do/"
+  },
+  "openGraph": {
+    "title": "Surface Dispatch | DIGDUG.DO",
+    "description": "Read Flatverse field reports, release updates, and the story of ToastPunk’s last transmission from beyond the Ice Wall.",
+    "url": "https://feed.digdug.do/",
+    "siteName": "DIGDUG.DO",
+    "type": "website",
+    "images": [
+      {
+        "url": "https://feed.digdug.do/surface-dispatch-relay.png",
+        "alt": "Surface Dispatch relay beyond the Ice Wall"
+      }
+    ]
+  },
+  "twitter": {
+    "card": "summary_large_image",
+    "title": "Surface Dispatch | DIGDUG.DO",
+    "description": "Read Flatverse field reports, release updates, and the story of ToastPunk’s last transmission from beyond the Ice Wall.",
+    "images": [
+      {
+        "url": "https://feed.digdug.do/surface-dispatch-relay.png",
+        "alt": "Surface Dispatch relay beyond the Ice Wall"
+      }
+    ]
+  }
+};
 
 const categories = ["All updates", "Releases", "Maintenance", "Migration", "Field update"] as const;
 type Dispatch = Awaited<ReturnType<typeof getDispatchPosts>>[number];
