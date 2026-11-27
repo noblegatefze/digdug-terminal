@@ -130,6 +130,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "update_failed" }, { status: 500 });
   }
 
+  if (process.env.DIGSTER_CHARACTER_MODE === "1") {
+    return NextResponse.json({ ok: true, username, tg_user_id: row.tg_user_id, terminal_user_id: user.id, code });
+  }
+
   if (!TG_GROUP_ID) {
     console.error("[tg verify] TELEGRAM_GROUP_ID not set; skipping announce/unmute");
     return NextResponse.json({
