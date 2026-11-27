@@ -85,10 +85,9 @@ export default async function SurfaceDispatch({ searchParams }: { searchParams: 
                 <p>{post.summary}</p>
                 {post.source && <p className="sd-source">Archive source · {post.source}</p>}
                 {post.body?.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
-                {post.id === "cross-over" && <p><Link href="https://www.digdug.do/#transmission">Read the homepage transmission</Link> · <a href="https://play.digdug.do/">Enter Flatverse</a></p>}
-                {post.id === "practice-world" && <p><a href="https://play.digdug.do/">Enter Flatverse</a></p>}
-                {post.id === "zero-phase" && <p><Link href="https://www.digdug.do/#transmission">Read the homepage transmission</Link> · <a href="https://fund.digdug.do/">Open Fund Network</a></p>}
-                {post.id === "2c1801a3-b074-4483-bf05-b66925d6f32f" && <p><a href="https://usddd.digdug.do/">Open Observatory</a></p>}
+                {!!post.links?.length && <footer aria-label="Dispatch links" style={{ display: "flex", flexWrap: "wrap", gap: "8px 16px", marginTop: 12 }}>
+                  {post.links.map((link, index) => <a key={index} href={link.url} style={{ color: "#92f4ff", textDecoration: "underline" }}>{link.title}</a>)}
+                </footer>}
               </details>
             </div>
           </article></div>)}
