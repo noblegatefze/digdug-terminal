@@ -720,21 +720,30 @@ export async function POST(req: NextRequest) {
       await handleUpdate(update);
     }
 
+    // Sample about one in 120 ordinary text messages. The same update always
+    // gives the same result, including when Telegram retries delivery.
     if (chat?.type === "supergroup" && TG_GROUP_CHAT_ID && chat.id === TG_GROUP_CHAT_ID &&
-        Number.isSafeInteger(message.message_id) && message.message_id > 0 &&
-        text.toLowerCase() === "/grumble@digsterbot") {
-      const grumbles = [
-        "I leave the tunnels for five minutes and you lot rename the whole world. What did I miss?",
-        "The old Terminal had one screen and that was plenty. What do you actually like about the new gear?",
-        "Everyone talks about Golden Cubes. Nobody tells me what their first extraction was like. How did yours go?",
-      ];
-      return NextResponse.json({
-        method: "sendMessage",
-        chat_id: chat.id,
-        text: grumbles[message.message_id % grumbles.length],
-        reply_parameters: { message_id: message.message_id },
-        ...(message.is_topic_message ? { message_thread_id: message.message_thread_id } : {}),
-      });
+        !message.sender_chat && Number.isSafeInteger(message.message_id) && message.message_id > 0 &&
+        typeof message.text === "string" && message.text.trim() && !message.text.trimStart().startsWith("/")) {
+      const sample = crypto.createHash("sha256")
+        .update(`${chat.id}:${message.message_id}`)
+        .digest();
+
+      if (sample.readUInt16BE(0) < 546) {
+        const grumbles = [
+          "The new team moved all my tools. They left the dent in the desk, though. ToastPunk put that there.",
+          "I told ToastPunk I’d keep the line open. Then the Overlord took him through the Ice Wall. I still check the receiver.",
+          "Demoted. Fine. I’ll be over here tightening bolts nobody else thinks to check.",
+          "I used to run this place. Now the new crew do. They’re doing all right. If anyone asks, I said the wiring’s a mess.",
+          "Somebody ought to check on the new diggers. I remember my first tunnel. ToastPunk waited by the gate till I got back.",
+        ];
+        return NextResponse.json({
+          method: "sendMessage",
+          chat_id: chat.id,
+          text: grumbles[sample[2] % grumbles.length],
+          ...(message.is_topic_message ? { message_thread_id: message.message_thread_id } : {}),
+        });
+      }
     }
 
     return NextResponse.json({ ok: true });
