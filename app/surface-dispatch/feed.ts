@@ -52,7 +52,7 @@ const lorePosts: Dispatch[] = [
     "source": "Ice Wall coordinate broadcast",
     "summary": "Axiom opens three regions at the edge of the Ice Wall and gives the surface crews a reason to dig.",
     "body": [
-      "“Follow the coordinates. The crates are under the ice. Take tools down and bring what you find back to the surface. Use the Observatory to compare reports from the other regions.”",
+      "“Follow the coordinates. The Blue Orbs are under the ice. Take tools down and bring what you find back to the surface. Use the Observatory to compare reports from the other regions.”",
       "The first crews set up three camps along the Ice Wall. Their reports agree on one thing. Below the camps, the tunnels keep changing."
     ],
     "art": 3,
@@ -114,7 +114,7 @@ const officialEntries: Dispatch[] = [
     category: "Releases",
     title: "The Practice World opens for explorers",
     summary: "Take a practice profile into Flatverse and try the full dig, carry and extract loop.",
-    body: ["Start at the surface, choose a region, and dig for crates. Bring your cargo back to a surface extraction point to record the find. Tap-to-travel is built in, and the Surface Shop can be reached on foot.", "Practice USDDD and the rewards shown during exploration are simulated."],
+    body: ["Start at the surface, choose a region, and dig for Blue Orbs. Bring your cargo back to a surface extraction point to record the find. Tap-to-travel is built in, and the Surface Shop can be reached on foot.", "Practice USDDD and the rewards shown during exploration are simulated."],
     publish_at: "2026-11-25",
     pinned: false,
     art: 6,
@@ -151,11 +151,25 @@ const officialEntries: Dispatch[] = [
   },
 ];
 
+function useOrbNames(text: string) {
+  return text.replace(/\bblue (?:crate|shard)s?\b|\bhidden crates\b|\bdig for crates\b|\bthe crates are under the ice\b/gi, (match) => {
+    switch (match.toLowerCase()) {
+      case "dig for crates": return "dig for Blue Orbs";
+      case "the crates are under the ice": return "The Blue Orbs are under the ice";
+      case "blue crate":
+      case "blue shard": return "Blue Orb";
+      default: return "Blue Orbs";
+    }
+  });
+}
+
 export async function getDispatchPosts() {
   const editorialById = new Map(officialEntries.map((post) => [post.id, post]));
   const published: Dispatch[] = (await publishedDispatches()).map((post) => ({
     ...editorialById.get(post.id),
     ...post,
+    summary: useOrbNames(post.summary),
+    body: post.body?.map(useOrbNames),
     category: post.category === "Release" ? "Releases" : post.category,
   }));
   const migrationNotice = editorialById.get("zero-phase");
